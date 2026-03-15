@@ -1,0 +1,3415 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>GTA MAP — Social</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Leaflet -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<style>
+/* ══ VARS & RESET ═══════════════════════════════════════ */
+:root{
+  --bg:#050a0e; --panel:#0c0f18; --panel2:#111622; --border:#1a2035;
+  --cyan:#00f5d4; --blue:#0090ff; --green:#39ff14; --red:#ff2244;
+  --orange:#ff9500; --yellow:#ffe600; --purple:#a855f7;
+  --white:#e8f4fb; --dim:#3a4560; --dim2:#243040;
+  --font-hud:'Share Tech Mono',monospace; --font-ui:'Rajdhani',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);cursor:default;}
+button{cursor:pointer;} input,button{font-family:var(--font-ui);}
+
+/* ══ MAP ════════════════════════════════════════════════ */
+#map{width:100vw;height:100vh;background:var(--bg);}
+.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) saturate(0.25) brightness(var(--map-brightness,0.55)) contrast(1.15);}
+.leaflet-control-attribution,.leaflet-control-zoom{display:none!important;}
+
+/* ══ OVERLAYS ═══════════════════════════════════════════ */
+#vignette{position:fixed;inset:0;pointer-events:none;z-index:399;
+  background:radial-gradient(ellipse at center,transparent 45%,rgba(0,0,0,0.72) 100%);}
+#scanlines{position:fixed;inset:0;pointer-events:none;z-index:398;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.06) 3px,rgba(0,0,0,0.06) 4px);}
+
+/* ══ TOP MENU BAR ════════════════════════════════════════ */
+#topbar{
+  position:fixed;top:0;left:0;right:0;z-index:600;
+  height:48px;
+  background:rgba(5,10,14,0.95);
+  border-bottom:1px solid var(--border);
+  backdrop-filter:blur(20px);
+  display:flex;align-items:center;
+  padding:0 20px; gap:0;
+}
+.topbar-logo{
+  font-family:var(--font-ui);font-weight:700;font-size:18px;
+  color:var(--orange);letter-spacing:4px;
+  text-shadow:0 0 16px #ff950066;
+  margin-right:24px; white-space:nowrap;
+}
+.topbar-logo span{color:var(--white);opacity:0.4;font-size:12px;letter-spacing:2px;margin-left:4px;}
+.nav-tabs{display:flex;gap:2px;}
+.nav-tab{
+  font-family:var(--font-ui);font-weight:700;font-size:12px;
+  letter-spacing:2px;text-transform:uppercase;
+  color:var(--dim);
+  background:transparent;border:none;
+  padding:0 18px;height:48px;
+  position:relative;transition:color 0.2s;
+}
+.nav-tab:hover{color:var(--white);}
+.nav-tab.active{color:var(--cyan);}
+.nav-tab.active::after{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
+  background:var(--cyan);box-shadow:0 0 8px var(--cyan);
+}
+.nav-tab .badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;border-radius:50%;
+  background:var(--red);color:#fff;font-size:9px;font-weight:700;
+  margin-left:5px;vertical-align:middle;
+  animation:flash 1s ease-in-out infinite;
+  display:none;
+}
+.nav-tab .badge.visible{display:inline-flex;}
+
+/* User pill on right */
+#user-pill{
+  margin-left:auto;display:flex;align-items:center;gap:10px;
+}
+#user-avatar{
+  width:28px;height:28px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-ui);font-weight:700;font-size:13px;
+  color:var(--bg);border:2px solid var(--cyan);
+  box-shadow:0 0 8px #00f5d444;
+}
+#user-name-display{
+  font-family:var(--font-ui);font-weight:600;font-size:13px;
+  color:var(--white);letter-spacing:1px;
+}
+.online-dot{
+  width:8px;height:8px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 6px var(--green);
+  animation:dot-blink 2s ease-in-out infinite;
+}
+@keyframes dot-blink{0%,100%{opacity:1;}50%{opacity:0.4;}}
+
+/* ══ PANELS ══════════════════════════════════════════════ */
+.side-panel{
+  position:fixed;top:48px;z-index:500;
+  width:300px;height:calc(100vh - 48px);
+  background:rgba(5,10,14,0.96);
+  border-right:1px solid var(--border);
+  backdrop-filter:blur(20px);
+  display:flex;flex-direction:column;
+  transform:translateX(-100%);
+  transition:transform 0.35s cubic-bezier(0.4,0,0.2,1);
+  overflow:hidden;
+}
+.side-panel.open{transform:translateX(0);}
+.side-panel.right{right:0;left:auto;border-right:none;border-left:1px solid var(--border);
+  transform:translateX(100%);}
+.side-panel.right.open{transform:translateX(0);}
+
+.panel-head{
+  padding:16px 18px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+}
+.panel-head-title{
+  font-family:var(--font-ui);font-weight:700;font-size:14px;
+  color:var(--white);letter-spacing:2px;text-transform:uppercase;
+}
+.panel-close{
+  background:none;border:none;color:var(--dim);font-size:18px;
+  transition:color 0.2s;padding:2px 6px;
+}
+.panel-close:hover{color:var(--red);}
+.panel-scroll{flex:1;overflow-y:auto;padding:14px;}
+
+/* ══ SCROLLBAR ══════════════════════════════════════════ */
+::-webkit-scrollbar{width:3px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+
+/* ══ AUTH SCREEN ════════════════════════════════════════ */
+#auth-screen{
+  position:fixed;inset:0;z-index:9000;
+  background:rgba(5,10,14,0.98);
+  display:flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(20px);
+}
+.auth-box{
+  width:360px;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:8px;
+  overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,0.8);
+}
+.auth-stripe{height:3px;background:linear-gradient(90deg,var(--orange),var(--yellow));}
+.auth-head{padding:28px 28px 0;text-align:center;}
+.auth-logo{
+  font-family:var(--font-ui);font-weight:700;font-size:28px;
+  color:var(--orange);letter-spacing:6px;
+  text-shadow:0 0 24px #ff950066;
+  margin-bottom:4px;
+}
+.auth-sub{font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:3px;}
+.auth-tabs{display:flex;margin:20px 0 0;border-bottom:1px solid var(--border);}
+.auth-tab{
+  flex:1;padding:10px;text-align:center;
+  font-family:var(--font-ui);font-weight:700;font-size:12px;
+  letter-spacing:2px;text-transform:uppercase;
+  color:var(--dim);background:none;border:none;
+  border-bottom:2px solid transparent;transition:all 0.2s;
+}
+.auth-tab.active{color:var(--orange);border-bottom-color:var(--orange);}
+.auth-body{padding:20px 28px 28px;}
+.auth-form{display:flex;flex-direction:column;gap:12px;}
+.auth-form.hidden{display:none;}
+.field-lbl{font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;}
+.auth-input{
+  width:100%;background:rgba(5,10,14,0.9);
+  border:1px solid var(--border);border-radius:3px;
+  color:var(--white);font-family:var(--font-ui);font-size:14px;font-weight:500;
+  padding:10px 14px;outline:none;transition:border-color 0.2s,box-shadow 0.2s;
+}
+.auth-input:focus{border-color:var(--orange);box-shadow:0 0 12px #ff950033;}
+.auth-btn{
+  width:100%;padding:13px;margin-top:4px;
+  background:linear-gradient(135deg,var(--orange),#ff6a00);
+  border:none;border-radius:3px;color:#000;
+  font-family:var(--font-ui);font-weight:700;font-size:14px;
+  letter-spacing:2px;text-transform:uppercase;
+  box-shadow:0 0 20px #ff950033;
+  transition:box-shadow 0.2s,transform 0.1s;
+}
+.auth-btn:hover{box-shadow:0 0 30px #ff950055;transform:translateY(-1px);}
+.auth-btn:active{transform:translateY(0);}
+.auth-msg{font-family:var(--font-hud);font-size:10px;text-align:center;padding:6px;border-radius:2px;}
+.auth-msg.error{color:var(--red);background:rgba(255,34,68,0.1);}
+.auth-msg.success{color:var(--green);background:rgba(57,255,20,0.1);}
+
+/* ══ HUD ELEMENTS ═══════════════════════════════════════ */
+#coords{
+  position:fixed;top:62px;left:16px;z-index:500;
+  font-family:var(--font-hud);font-size:10px;color:var(--dim);
+  letter-spacing:1px;line-height:1.9;
+}
+#clock{
+  position:fixed;top:58px;right:16px;z-index:500;
+  font-family:var(--font-hud);font-size:22px;color:var(--white);
+  letter-spacing:2px;text-shadow:0 0 12px rgba(0,200,255,0.3);
+}
+
+
+/* Mission area */
+#mission-area{
+  position:fixed;bottom:28px;right:16px;z-index:500;
+  display:flex;flex-direction:column;align-items:flex-end;gap:8px;
+}
+#route-info{display:none;background:rgba(5,10,14,0.88);border:1px solid var(--border);
+  border-radius:3px;padding:10px 16px;text-align:right;}
+#route-info.visible{display:block;}
+#route-dist{color:var(--orange);font-family:var(--font-ui);font-weight:700;font-size:20px;}
+#route-time{color:var(--dim);font-family:var(--font-hud);font-size:10px;margin-top:2px;}
+#btn-mission{
+  display:none;background:linear-gradient(135deg,var(--orange),#ff6a00);
+  border:none;border-radius:3px;color:#000;
+  font-family:var(--font-ui);font-weight:700;font-size:13px;letter-spacing:2px;
+  padding:12px 26px;box-shadow:0 0 20px #ff950055;
+  animation:mission-pulse 1.5s ease-in-out infinite;
+}
+#btn-mission.visible{display:block;}
+@keyframes mission-pulse{0%,100%{box-shadow:0 0 20px #ff950055;}50%{box-shadow:0 0 36px #ff9500aa;}}
+#mission-badge{display:none;background:rgba(255,149,0,0.1);border:1px solid #ff950044;
+  border-radius:3px;padding:5px 12px;
+  font-family:var(--font-ui);font-weight:700;font-size:10px;
+  color:var(--orange);letter-spacing:2px;text-transform:uppercase;
+  animation:flash 1s ease-in-out infinite;}
+#mission-badge.visible{display:block;}
+@keyframes flash{0%,100%{opacity:1;}50%{opacity:0.4;}}
+#btn-cancel-mission{display:none;background:rgba(255,34,68,0.1);
+  border:1px solid #ff224433;border-radius:3px;color:var(--red);
+  font-family:var(--font-ui);font-weight:700;font-size:10px;
+  letter-spacing:2px;padding:7px 14px;transition:background 0.2s;}
+#btn-cancel-mission:hover{background:rgba(255,34,68,0.22);}
+#btn-cancel-mission.visible{display:block;}
+
+/* Watermark */
+#watermark{position:fixed;bottom:14px;left:16px;z-index:500;
+  font-family:var(--font-hud);font-size:8px;color:#111e2a;letter-spacing:3px;}
+
+/* ══ FRIENDS PANEL ══════════════════════════════════════ */
+.search-box{position:relative;margin-bottom:12px;}
+.search-box input{
+  width:100%;background:rgba(5,10,14,0.9);
+  border:1px solid var(--border);border-radius:3px;
+  color:var(--white);font-family:var(--font-ui);
+  font-size:13px;font-weight:500;padding:9px 12px;outline:none;
+  transition:border-color 0.2s;
+}
+.search-box input:focus{border-color:var(--cyan);}
+.search-box input::placeholder{color:var(--dim);}
+.search-dropdown{
+  position:absolute;top:100%;left:0;right:0;z-index:700;
+  background:rgba(8,12,20,0.99);border:1px solid var(--border);
+  border-top:none;border-radius:0 0 3px 3px;
+  max-height:200px;overflow-y:auto;display:none;
+}
+.search-dropdown.open{display:block;}
+.dropdown-item{
+  padding:9px 12px;border-bottom:1px solid var(--dim2);
+  display:flex;align-items:center;gap:10px;
+  transition:background 0.15s;
+}
+.dropdown-item:hover{background:rgba(0,245,212,0.07);}
+.d-avatar{width:28px;height:28px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;
+  font-family:var(--font-ui);font-weight:700;font-size:12px;color:var(--bg);flex-shrink:0;}
+.d-name{color:var(--white);font-family:var(--font-ui);font-size:13px;font-weight:600;flex:1;}
+.d-btn{background:rgba(0,245,212,0.1);border:1px solid #00f5d433;
+  border-radius:2px;color:var(--cyan);
+  font-family:var(--font-ui);font-weight:700;font-size:10px;
+  letter-spacing:1px;padding:4px 10px;transition:background 0.2s;white-space:nowrap;}
+.d-btn:hover{background:rgba(0,245,212,0.22);}
+
+/* Friend card */
+.friend-card{
+  background:var(--panel2);border:1px solid var(--border);
+  border-radius:4px;padding:12px;margin-bottom:8px;
+  display:flex;align-items:center;gap:10px;
+  transition:border-color 0.2s,box-shadow 0.2s;
+  position:relative;overflow:hidden;
+}
+.friend-card:hover{border-color:var(--dim);box-shadow:0 2px 12px rgba(0,0,0,0.4);}
+.friend-card.online{border-left:3px solid var(--green);}
+.friend-card.offline{border-left:3px solid var(--dim);}
+.f-avatar{width:36px;height:36px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;
+  font-family:var(--font-ui);font-weight:700;font-size:16px;color:var(--bg);
+  flex-shrink:0;position:relative;}
+.f-status-dot{position:absolute;bottom:0;right:0;
+  width:10px;height:10px;border-radius:50%;border:2px solid var(--panel2);}
+.f-status-dot.online{background:var(--green);box-shadow:0 0 5px var(--green);}
+.f-status-dot.offline{background:var(--dim);}
+.f-info{flex:1;min-width:0;}
+.f-name{color:var(--white);font-family:var(--font-ui);font-weight:700;font-size:14px;}
+.f-status{font-family:var(--font-hud);font-size:9px;letter-spacing:1px;margin-top:2px;}
+.f-status.online{color:var(--green);}
+.f-status.offline{color:var(--dim);}
+.f-actions{display:flex;gap:5px;flex-shrink:0;}
+.fa-btn{
+  width:28px;height:28px;border-radius:2px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;border:1px solid transparent;transition:all 0.15s;
+}
+.fa-btn.locate{background:rgba(0,144,255,0.1);border-color:#0090ff33;color:var(--blue);}
+.fa-btn.locate:hover{background:rgba(0,144,255,0.25);}
+.fa-btn.toggle{background:rgba(57,255,20,0.1);border-color:#39ff1433;color:var(--green);}
+.fa-btn.toggle:hover{background:rgba(57,255,20,0.22);}
+.fa-btn.toggle.hidden-friend{background:rgba(58,69,96,0.2);border-color:var(--dim2);color:var(--dim);}
+.fa-btn.remove{background:rgba(255,34,68,0.08);border-color:#ff224422;color:var(--red);}
+.fa-btn.remove:hover{background:rgba(255,34,68,0.2);}
+
+/* Requests */
+.req-card{
+  background:rgba(255,149,0,0.05);border:1px solid #ff950033;
+  border-radius:4px;padding:10px 12px;margin-bottom:6px;
+  display:flex;align-items:center;gap:10px;
+}
+.req-actions{display:flex;gap:5px;margin-left:auto;flex-shrink:0;}
+.req-btn-accept{background:rgba(57,255,20,0.12);border:1px solid #39ff1444;
+  border-radius:2px;color:var(--green);font-family:var(--font-ui);
+  font-weight:700;font-size:10px;letter-spacing:1px;padding:5px 10px;transition:background 0.2s;}
+.req-btn-accept:hover{background:rgba(57,255,20,0.25);}
+.req-btn-decline{background:rgba(255,34,68,0.08);border:1px solid #ff224433;
+  border-radius:2px;color:var(--red);font-family:var(--font-ui);
+  font-weight:700;font-size:10px;letter-spacing:1px;padding:5px 10px;transition:background 0.2s;}
+.req-btn-decline:hover{background:rgba(255,34,68,0.2);}
+
+.section-label{font-family:var(--font-hud);font-size:9px;color:var(--dim);
+  letter-spacing:2px;text-transform:uppercase;margin:14px 0 8px;
+  display:flex;align-items:center;gap:8px;}
+.section-label::after{content:'';flex:1;height:1px;background:var(--dim2);}
+.empty-state{text-align:center;padding:24px 0;
+  font-family:var(--font-hud);font-size:10px;color:var(--dim2);letter-spacing:1px;}
+
+/* ══ STATS PANEL ════════════════════════════════════════ */
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;}
+.stat-card{background:var(--panel2);border:1px solid var(--border);
+  border-radius:4px;padding:14px 12px;text-align:center;}
+.stat-val{font-family:var(--font-ui);font-weight:700;font-size:22px;color:var(--cyan);}
+.stat-lbl{font-family:var(--font-hud);font-size:9px;color:var(--dim);
+  letter-spacing:1.5px;margin-top:4px;text-transform:uppercase;}
+
+/* ══ SETTINGS PANEL ═════════════════════════════════════ */
+.setting-row{display:flex;align-items:center;justify-content:space-between;
+  padding:12px 0;border-bottom:1px solid var(--dim2);}
+.setting-label{font-family:var(--font-ui);font-weight:600;font-size:13px;color:var(--white);}
+.setting-sub{font-family:var(--font-hud);font-size:9px;color:var(--dim);margin-top:2px;}
+.toggle-switch{position:relative;width:38px;height:20px;flex-shrink:0;}
+.toggle-switch input{opacity:0;width:0;height:0;}
+.toggle-switch .slider{
+  position:absolute;inset:0;background:var(--dim2);border-radius:20px;
+  transition:background 0.2s;cursor:pointer;}
+.toggle-switch input:checked+.slider{background:var(--cyan);}
+.toggle-switch .slider::before{content:'';position:absolute;
+  width:14px;height:14px;left:3px;top:3px;
+  background:var(--bg);border-radius:50%;transition:transform 0.2s;}
+.toggle-switch input:checked+.slider::before{transform:translateX(18px);}
+.danger-btn{
+  width:100%;margin-top:16px;padding:10px;
+  background:rgba(255,34,68,0.1);border:1px solid #ff224444;
+  border-radius:3px;color:var(--red);
+  font-family:var(--font-ui);font-weight:700;font-size:12px;
+  letter-spacing:2px;text-transform:uppercase;
+  transition:background 0.2s;}
+.danger-btn:hover{background:rgba(255,34,68,0.22);}
+
+/* ══ NAV PANEL (map) ════════════════════════════════════ */
+#nav-panel{
+  position:fixed;bottom:28px;left:16px;z-index:500;
+  width:280px;background:rgba(5,10,14,0.92);
+  border:1px solid var(--border);border-radius:5px;
+  backdrop-filter:blur(14px);overflow:hidden;
+  transition:transform 0.35s cubic-bezier(0.4,0,0.2,1), left 0.35s cubic-bezier(0.4,0,0.2,1);
+}
+.nav-stripe{height:2px;background:linear-gradient(90deg,var(--cyan),var(--blue));}
+.nav-body{padding:12px;}
+.nav-field-lbl{font-family:var(--font-hud);font-size:8px;color:var(--dim);
+  letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px;}
+.nav-input-wrap{position:relative;margin-bottom:8px;}
+.nav-input{
+  width:100%;background:rgba(5,10,14,0.9);
+  border:1px solid var(--border);border-radius:3px;
+  color:var(--white);font-family:var(--font-ui);font-size:13px;font-weight:500;
+  padding:8px 10px;outline:none;transition:border-color 0.2s;}
+.nav-input:focus{border-color:var(--cyan);}
+.nav-input::placeholder{color:var(--dim);}
+.nav-results{
+  position:absolute;top:100%;left:0;right:0;z-index:700;
+  background:rgba(8,12,20,0.99);border:1px solid var(--border);
+  border-top:none;border-radius:0 0 3px 3px;
+  max-height:160px;overflow-y:auto;display:none;}
+.nav-results.open{display:block;}
+.nav-result-item{padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--dim2);transition:background 0.15s;}
+.nav-result-item:hover{background:rgba(0,245,212,0.07);}
+.nav-result-name{color:var(--white);font-family:var(--font-ui);font-size:12px;font-weight:600;}
+.nav-result-addr{color:var(--dim);font-family:var(--font-hud);font-size:9px;margin-top:1px;}
+.nav-btn-row{display:flex;gap:5px;margin-top:4px;}
+.nav-btn{font-family:var(--font-ui);font-weight:700;font-size:11px;
+  letter-spacing:1.5px;text-transform:uppercase;
+  border-radius:2px;padding:8px 0;border:1px solid transparent;transition:all 0.2s;}
+.nav-btn.route{flex:1;background:rgba(0,200,255,0.1);border-color:#00c8ff33;color:#00c8ff;}
+.nav-btn.route:hover{background:rgba(0,200,255,0.2);}
+.nav-btn.locate{padding:8px 10px;background:rgba(57,255,20,0.08);
+  border-color:#39ff1433;color:var(--green);font-size:14px;}
+.nav-btn.locate:hover{background:rgba(57,255,20,0.18);}
+.nav-btn.clear{padding:8px 9px;background:rgba(255,34,68,0.08);
+  border-color:#ff224422;color:var(--red);display:none;}
+.nav-btn.clear:hover{background:rgba(255,34,68,0.2);}
+.nav-btn.clear.show{display:block;}
+
+/* ══ MAP CONTROLS ═══════════════════════════════════════ */
+#map-controls{
+  position:fixed;right:16px;top:50%;transform:translateY(-50%);
+  z-index:500;display:flex;flex-direction:column;gap:5px;
+  transition: right 0.35s cubic-bezier(0.4,0,0.2,1), left 0.35s cubic-bezier(0.4,0,0.2,1);}
+.ctrl-btn{
+  width:36px;height:36px;background:rgba(5,10,14,0.9);
+  border:1px solid var(--border);border-radius:3px;
+  color:#7ab8cc;font-family:var(--font-ui);font-size:17px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(8px);transition:all 0.2s;}
+.ctrl-btn:hover{background:rgba(0,245,212,0.1);
+  border-color:#00f5d444;color:var(--cyan);box-shadow:0 0 10px #00f5d422;}
+.ctrl-sep{height:6px;}
+
+/* ══ TOAST ══════════════════════════════════════════════ */
+#toast-container{position:fixed;top:64px;left:50%;transform:translateX(-50%);
+  z-index:9500;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;}
+.toast{
+  background:rgba(5,10,14,0.96);border:1px solid var(--border);
+  border-radius:3px;padding:9px 18px;
+  font-family:var(--font-hud);font-size:11px;letter-spacing:1px;
+  white-space:nowrap;
+  animation:toast-in 0.3s ease,toast-out 0.4s ease 2.6s forwards;}
+.toast.ok{color:var(--green);border-color:#39ff1433;}
+.toast.err{color:var(--red);border-color:#ff224433;}
+.toast.info{color:var(--cyan);border-color:#00f5d433;}
+@keyframes toast-in{from{opacity:0;transform:translateY(-10px);}to{opacity:1;transform:translateY(0);}}
+@keyframes toast-out{from{opacity:1;}to{opacity:0;}}
+
+/* ══ LOADING ════════════════════════════════════════════ */
+#loading{position:fixed;inset:0;z-index:9999;background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;}
+.loading-logo{font-family:var(--font-ui);font-weight:700;font-size:36px;
+  color:var(--orange);letter-spacing:8px;
+  text-shadow:0 0 30px var(--orange);animation:glow-pulse 1.5s ease-in-out infinite;}
+@keyframes glow-pulse{0%,100%{text-shadow:0 0 30px var(--orange);}50%{text-shadow:0 0 60px var(--orange),0 0 90px #ff950044;}}
+.loading-sub{font-family:var(--font-hud);font-size:10px;color:var(--dim);letter-spacing:3px;}
+.loading-bar-wrap{width:200px;height:2px;background:var(--dim2);border-radius:1px;overflow:hidden;}
+.loading-bar{height:100%;background:var(--orange);border-radius:1px;
+  animation:bar-anim 1.8s ease-in-out infinite;}
+@keyframes bar-anim{0%{width:0;margin-left:0;}60%{width:65%;margin-left:0;}100%{width:0;margin-left:100%;}}
+
+/* ══ CUSTOM MARKERS ═════════════════════════════════════ */
+.player-wrap{position:relative;width:20px;height:20px;}
+.player-dot{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:11px;height:11px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 10px var(--green),0 0 20px #39ff1444;}
+.player-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  border:2px solid #39ff1455;border-radius:50%;animation:ring-exp 2s ease-out infinite;}
+.player-ring.r2{animation-delay:1s;}
+@keyframes ring-exp{0%{width:11px;height:11px;opacity:1;}100%{width:44px;height:44px;opacity:0;}}
+
+.dest-wrap{position:relative;}
+.dest-pin{width:28px;height:28px;
+  background:linear-gradient(135deg,var(--orange),#ff6a00);
+  clip-path:polygon(50% 0%,100% 38%,82% 100%,18% 100%,0% 38%);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 14px #ff9500aa;animation:dest-bob 2s ease-in-out infinite;
+  font-size:12px;color:#000;font-weight:900;padding-top:2px;}
+@keyframes dest-bob{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
+
+.friend-marker-wrap{position:relative;text-align:center;}
+.friend-avatar-m{width:32px;height:32px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-ui);font-weight:700;font-size:14px;color:var(--bg);
+  border:2px solid var(--bg);box-shadow:0 0 10px rgba(0,0,0,0.5);
+  position:relative;}
+.friend-status-m{position:absolute;bottom:-1px;right:-1px;
+  width:9px;height:9px;border-radius:50%;border:2px solid var(--bg);}
+.friend-status-m.online{background:var(--green);box-shadow:0 0 4px var(--green);}
+.friend-status-m.offline{background:var(--dim);}
+.friend-label-m{
+  margin-top:3px;font-family:var(--font-hud);font-size:9px;
+  color:var(--white);letter-spacing:1px;
+  background:rgba(5,10,14,0.8);padding:1px 5px;border-radius:2px;
+  white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,0.8);}
+
+/* ══ MOBILE BOTTOM NAV ══════════════════════════════════ */
+#mobile-nav{
+  display:none;
+  position:fixed;bottom:0;left:0;right:0;z-index:600;
+  height:56px;
+  background:rgba(5,10,14,0.97);
+  border-top:1px solid var(--border);
+  backdrop-filter:blur(20px);
+  flex-direction:row;
+  align-items:stretch;
+}
+.mob-tab{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;border:none;background:none;
+  color:var(--dim);font-family:var(--font-hud);font-size:8px;letter-spacing:1px;
+  transition:color 0.2s;position:relative;
+}
+.mob-tab .icon{font-size:18px;line-height:1;}
+.mob-tab.active{color:var(--cyan);}
+.mob-tab.active::after{
+  content:'';position:absolute;top:0;left:20%;right:20%;height:2px;
+  background:var(--cyan);box-shadow:0 0 6px var(--cyan);border-radius:0 0 2px 2px;
+}
+.mob-tab .mob-badge{
+  position:absolute;top:6px;right:calc(50% - 16px);
+  width:14px;height:14px;border-radius:50%;
+  background:var(--red);color:#fff;font-size:8px;font-weight:700;
+  display:none;align-items:center;justify-content:center;
+}
+.mob-tab .mob-badge.visible{display:flex;}
+
+/* ══ MOBILE NAV DRAWER (partenza/dest) ══════════════════ */
+#nav-drawer{
+  display:none;
+  position:fixed;bottom:56px;left:0;right:0;z-index:590;
+  background:rgba(5,10,14,0.97);
+  border-top:1px solid var(--border);
+  backdrop-filter:blur(20px);
+  padding:12px 14px;
+  transform:translateY(100%);
+  transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+#nav-drawer.open{transform:translateY(0);}
+#nav-drawer-toggle{
+  display:none;
+  position:fixed;bottom:64px;right:14px;z-index:595;
+  width:44px;height:44px;border-radius:50%;
+  background:var(--orange);border:none;
+  color:#000;font-size:20px;font-weight:700;
+  box-shadow:0 0 16px #ff950066;
+  animation:mission-pulse 2s ease-in-out infinite;
+}
+
+/* ══ MOBILE RESPONSIVE ══════════════════════════════════ */
+@media (max-width: 768px) {
+  /* Hide desktop topbar tabs, show logo only */
+  .nav-tabs{ display:none; }
+  #topbar{ padding:0 12px; height:48px; }
+  .topbar-logo{ font-size:16px; margin-right:0; }
+
+  /* Hide desktop elements */
+  #map-controls{ display:none; }
+  #coords{ display:none; }
+  #clock{ top:14px; right:12px; font-size:16px; }
+  #watermark{ display:none; }
+
+  /* Online count */
+  #online-pill{
+    font-size:9px; padding:0 8px;
+  }
+
+  /* Side panels full screen on mobile */
+  .side-panel{
+    width:100vw !important;
+    top:48px !important;
+    height:calc(100vh - 48px - 56px) !important;
+  }
+
+  /* Nav panel hidden on mobile (use drawer instead) */
+  #nav-panel{ display:none !important; }
+  #mission-area{ bottom:68px; right:12px; }
+  #btn-mission{ font-size:12px; padding:10px 18px; }
+
+  /* Show mobile nav */
+  #mobile-nav{ display:flex; }
+  #nav-drawer{ display:block; }
+  #nav-drawer-toggle{ display:flex; align-items:center; justify-content:center; }
+
+  /* Auth box mobile */
+  .auth-box{ width:92vw; margin:0 auto; }
+
+  /* Mission area above mobile nav */
+  #mission-area{ bottom:66px; }
+
+  /* Friends/stats panels */
+  .panel-scroll{ padding:10px; }
+  .stat-grid{ grid-template-columns:1fr 1fr; gap:6px; }
+  .friend-card{ padding:10px; }
+}
+
+@media (max-width: 400px) {
+  .auth-logo{ font-size:22px; }
+  .mob-tab .icon{ font-size:16px; }
+  .mob-tab{ font-size:7px; }
+}
+/* ══ GAMES PANEL ════════════════════════════════════════ */
+.game-card{
+  background:var(--panel2);border:1px solid var(--border);
+  border-radius:6px;padding:14px;margin-bottom:10px;
+  cursor:pointer;transition:all 0.2s;position:relative;overflow:hidden;
+}
+.game-card:hover{border-color:var(--orange);box-shadow:0 0 16px #ff950022;}
+.game-card.active-game{border-color:var(--orange);box-shadow:0 0 20px #ff950033;}
+.game-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--orange),var(--yellow));
+  opacity:0;transition:opacity 0.2s;
+}
+.game-card:hover::before,.game-card.active-game::before{opacity:1;}
+.game-title{font-family:var(--font-ui);font-weight:700;font-size:15px;color:var(--white);margin-bottom:4px;}
+.game-desc{font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1px;line-height:1.6;margin-bottom:10px;}
+.game-btn{
+  font-family:var(--font-ui);font-weight:700;font-size:11px;
+  letter-spacing:2px;text-transform:uppercase;
+  border-radius:3px;padding:8px 16px;border:1px solid transparent;
+  transition:all 0.2s;cursor:pointer;
+}
+.game-btn.start{background:rgba(255,149,0,0.15);border-color:#ff950055;color:var(--orange);}
+.game-btn.start:hover{background:rgba(255,149,0,0.3);box-shadow:0 0 12px #ff950044;}
+.game-btn.stop{background:rgba(255,34,68,0.15);border-color:#ff224455;color:var(--red);}
+.game-btn.stop:hover{background:rgba(255,34,68,0.3);}
+.game-status{
+  font-family:var(--font-hud);font-size:10px;color:var(--green);
+  letter-spacing:1px;margin-top:8px;display:none;
+  animation:flash 1.5s ease-in-out infinite;
+}
+.game-score{
+  background:rgba(5,10,14,0.8);border:1px solid var(--border);
+  border-radius:3px;padding:8px 10px;margin-top:8px;
+  font-family:var(--font-hud);font-size:10px;color:var(--white);
+  letter-spacing:1px;display:none;
+}
+/* Leaderboard */
+.lb-row{
+  display:flex;align-items:center;gap:8px;padding:7px 0;
+  border-bottom:1px solid var(--dim2);font-family:var(--font-ui);
+}
+.lb-rank{width:20px;font-size:12px;font-weight:700;color:var(--dim);}
+.lb-rank.gold{color:#ffd700;}
+.lb-rank.silver{color:#c0c0c0;}
+.lb-rank.bronze{color:#cd7f32;}
+.lb-name{flex:1;font-size:13px;color:var(--white);font-weight:600;}
+.lb-val{font-family:var(--font-hud);font-size:10px;color:var(--cyan);}
+
+/* Game map overlay */
+#game-overlay{
+  position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+  z-index:800;
+  background:rgba(5,10,14,0.92);
+  border:1px solid var(--orange);border-radius:6px;
+  padding:10px 16px;
+  font-family:var(--font-hud);font-size:11px;color:var(--orange);
+  letter-spacing:1.5px;text-align:center;
+  display:none;box-shadow:0 0 20px #ff950044;
+  pointer-events:none;
+}
+#game-overlay.visible{display:block;}
+/* ══ LOBBY CSS ══════════════════════════════════════════ */
+.time-opt{
+  flex:1;padding:7px 0;background:rgba(5,10,14,0.8);
+  border:1px solid var(--border);border-radius:3px;
+  color:var(--dim);font-family:var(--font-ui);font-weight:700;font-size:11px;
+  cursor:pointer;transition:all 0.2s;
+}
+.time-opt.active,.time-opt:hover{
+  background:rgba(255,149,0,0.15);border-color:#ff950055;color:var(--orange);
+}
+.lobby-player{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;
+  background:var(--panel2);border:1px solid var(--border);border-radius:4px;
+}
+.lobby-player.ready{border-color:#39ff1444;background:rgba(57,255,20,0.05);}
+.lp-avatar{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-family:var(--font-ui);font-weight:700;font-size:12px;color:var(--bg);flex-shrink:0;}
+.lp-name{flex:1;font-family:var(--font-ui);font-weight:600;font-size:13px;color:var(--white);}
+.lp-ready{font-family:var(--font-hud);font-size:9px;letter-spacing:1px;}
+.lp-ready.yes{color:var(--green);}
+.lp-ready.no{color:var(--dim);}
+.live-row{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;
+  background:var(--panel2);border:1px solid var(--border);border-radius:4px;
+}
+.live-row.me{border-color:#ff950055;background:rgba(255,149,0,0.06);}
+.live-rank{width:22px;font-family:var(--font-ui);font-weight:700;font-size:14px;color:var(--dim);text-align:center;}
+.live-name{flex:1;font-family:var(--font-ui);font-weight:600;font-size:13px;color:var(--white);}
+.live-val{font-family:var(--font-hud);font-size:11px;color:var(--cyan);}
+.hide-opt{
+  padding:7px 12px;background:rgba(5,10,14,0.8);
+  border:1px solid var(--border);border-radius:3px;
+  color:var(--dim);font-family:var(--font-ui);font-weight:700;font-size:11px;
+  cursor:pointer;transition:all 0.2s;
+}
+.hide-opt.active,.hide-opt:hover{
+  background:rgba(168,85,247,0.15);border-color:#a855f755;color:var(--purple);
+}
+.join-input-wrap{display:flex;gap:8px;margin-bottom:10px;}
+.join-input{flex:1;background:rgba(5,10,14,0.9);border:1px solid var(--border);border-radius:3px;
+  color:var(--white);font-family:var(--font-ui);font-size:18px;font-weight:700;
+  padding:10px 14px;outline:none;letter-spacing:4px;text-transform:uppercase;text-align:center;
+  transition:border-color 0.2s;}
+.join-input:focus{border-color:var(--orange);}
+</style>
+</head>
+<body>
+
+<!-- ══ LOADING ══════════════════════════════════════════ -->
+<div id="loading">
+  <div class="loading-logo">GTA MAP</div>
+  <div class="loading-sub">Inizializzazione sistema...</div>
+  <div class="loading-bar-wrap"><div class="loading-bar"></div></div>
+</div>
+
+<!-- ══ AUTH SCREEN ═══════════════════════════════════════ -->
+<div id="auth-screen" style="display:none;">
+  <div class="auth-box">
+    <div class="auth-stripe"></div>
+    <div class="auth-head">
+      <div class="auth-logo">GTA MAP</div>
+      <div class="auth-sub">SOCIAL EDITION — ACCEDI PER CONTINUARE</div>
+      <div class="auth-tabs">
+        <button class="auth-tab" onclick="switchAuthTab('login')">Accedi</button>
+        <button class="auth-tab active" onclick="switchAuthTab('register')">Registrati</button>
+      </div>
+    </div>
+    <div class="auth-body">
+      <!-- Login -->
+      <div class="auth-form hidden" id="form-login">
+        <div><div class="field-lbl">Email</div>
+          <input class="auth-input" id="login-email" type="email" placeholder="tuo@email.com"/></div>
+        <div><div class="field-lbl">Password</div>
+          <input class="auth-input" id="login-pass" type="password" placeholder="••••••••"/></div>
+        <div id="login-msg" class="auth-msg" style="display:none;"></div>
+        <button class="auth-btn" onclick="doLogin()">ENTRA</button>
+      </div>
+      <!-- Register -->
+      <div class="auth-form" id="form-register">
+        <div><div class="field-lbl">Username</div>
+          <input class="auth-input" id="reg-username" placeholder="Il tuo nome in gioco" maxlength="20"/></div>
+        <div><div class="field-lbl">Email</div>
+          <input class="auth-input" id="reg-email" type="email" placeholder="tuo@email.com"/></div>
+        <div><div class="field-lbl">Password</div>
+          <input class="auth-input" id="reg-pass" type="password" placeholder="min 6 caratteri"/></div>
+        <div id="reg-msg" class="auth-msg" style="display:none;"></div>
+        <button class="auth-btn" onclick="doRegister()">CREA ACCOUNT</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MAP ═══════════════════════════════════════════════ -->
+<div id="map"></div>
+<div id="vignette"></div>
+<div id="scanlines"></div>
+
+<!-- ══ TOPBAR ════════════════════════════════════════════ -->
+<div id="topbar">
+  <div class="topbar-logo">GTA<span>MAP</span></div>
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-panel="map" onclick="switchTab('map')">🗺 Mappa</button>
+    <button class="nav-tab" data-panel="friends" onclick="switchTab('friends')">
+      👥 Amici<span class="badge" id="req-badge">0</span>
+    </button>
+    <button class="nav-tab" data-panel="stats" onclick="switchTab('stats')">📊 Statistiche</button>
+    <button class="nav-tab" data-panel="games" onclick="switchTab('games')" style="color:var(--orange);">🎮 Giochi</button>
+    <div style="display:flex;align-items:center;padding:0 14px;height:48px;border-left:1px solid var(--border);margin-left:4px;">
+      <span style="font-family:var(--font-hud);font-size:10px;color:var(--dim);letter-spacing:1.5px;">ONLINE&nbsp;</span>
+      <span id="online-num" style="font-family:var(--font-hud);font-size:11px;color:var(--green);font-weight:700;text-shadow:0 0 6px var(--green);">0</span>
+    </div>
+    <button class="nav-tab" data-panel="settings" onclick="switchTab('settings')">⚙ Impostazioni</button>
+  </div>
+  <div id="user-pill">
+    <div class="online-dot"></div>
+    <div id="user-avatar" style="background:var(--cyan);">?</div>
+    <div id="user-name-display">—</div>
+  </div>
+</div>
+
+<!-- ══ FRIENDS PANEL ══════════════════════════════════════ -->
+<div class="side-panel" id="panel-friends">
+  <div class="panel-head">
+    <div class="panel-head-title">👥 Amici</div>
+    <button class="panel-close" onclick="switchTab('map')">✕</button>
+  </div>
+  <div class="panel-scroll">
+    <!-- Search users -->
+    <div class="section-label">Cerca Giocatori</div>
+    <div class="search-box">
+      <input id="user-search" placeholder="Cerca username..." autocomplete="off" oninput="searchUsers(this.value)"/>
+      <div class="search-dropdown" id="user-results"></div>
+    </div>
+    <!-- Requests -->
+    <div id="requests-section" style="display:none;">
+      <div class="section-label">Richieste Pendenti</div>
+      <div id="requests-list"></div>
+    </div>
+    <!-- Friends -->
+    <div class="section-label">Lista Amici</div>
+    <div id="friends-list"><div class="empty-state">Nessun amico ancora.<br/>Cerca un giocatore!</div></div>
+  </div>
+</div>
+
+<!-- ══ STATS PANEL ════════════════════════════════════════ -->
+<div class="side-panel" id="panel-stats">
+  <div class="panel-head">
+    <div class="panel-head-title">📊 Statistiche</div>
+    <button class="panel-close" onclick="switchTab('map')">✕</button>
+  </div>
+  <div class="panel-scroll">
+    <!-- KM Stats grid -->
+    <div class="stat-grid">
+      <!-- Oggi -->
+      <div class="stat-card" style="border-left:3px solid var(--cyan);">
+        <div style="font-family:var(--font-hud);font-size:8px;color:var(--dim);letter-spacing:1.5px;margin-bottom:4px;">OGGI</div>
+        <div class="stat-val" id="stat-km-today">0 km</div>
+        <div class="stat-lbl" id="stat-time-today" style="color:var(--cyan);margin-top:4px;font-size:9px;">— min</div>
+      </div>
+      <!-- Totale -->
+      <div class="stat-card" style="border-left:3px solid var(--orange);">
+        <div style="font-family:var(--font-hud);font-size:8px;color:var(--dim);letter-spacing:1.5px;margin-bottom:4px;">TOTALE</div>
+        <div class="stat-val" id="stat-km-total" style="color:var(--orange);">0 km</div>
+        <div class="stat-lbl" id="stat-time-total" style="color:var(--orange);margin-top:4px;font-size:9px;">— min</div>
+      </div>
+      <!-- Amici -->
+      <div class="stat-card" style="border-left:3px solid var(--green);">
+        <div style="font-family:var(--font-hud);font-size:8px;color:var(--dim);letter-spacing:1.5px;margin-bottom:4px;">AMICI</div>
+        <div class="stat-val" id="stat-friends" style="color:var(--green);">0</div>
+        <div class="stat-lbl" style="color:var(--green);margin-top:4px;font-size:9px;" id="stat-online-sub">0 online</div>
+      </div>
+      <!-- Percorsi -->
+      <div class="stat-card" style="border-left:3px solid var(--purple);">
+        <div style="font-family:var(--font-hud);font-size:8px;color:var(--dim);letter-spacing:1.5px;margin-bottom:4px;">PERCORSI</div>
+        <div class="stat-val" id="stat-routes" style="color:var(--purple);">0</div>
+        <div class="stat-lbl" style="color:var(--purple);margin-top:4px;font-size:9px;">questa sessione</div>
+      </div>
+    </div>
+    <div class="section-label">Account</div>
+    <div style="background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:14px;">
+      <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;">USERNAME</div>
+      <div style="font-family:var(--font-ui);font-weight:700;font-size:16px;color:var(--white);" id="stat-username">—</div>
+      <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin:10px 0 4px;">ID GIOCATORE</div>
+      <div style="font-family:var(--font-hud);font-size:10px;color:var(--dim);" id="stat-uid">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SETTINGS PANEL ════════════════════════════════════ -->
+<div class="side-panel right" id="panel-settings">
+  <div class="panel-head">
+    <div class="panel-head-title">⚙ Impostazioni</div>
+    <button class="panel-close" onclick="switchTab('map')">✕</button>
+  </div>
+  <div class="panel-scroll">
+    <div class="section-label">Mappa</div>
+    <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:8px;">
+      <div><div class="setting-label">Luminosità mappa</div>
+        <div class="setting-sub">Regola la luminosità</div></div>
+      <div style="display:flex;align-items:center;gap:10px;width:100%;">
+        <span>🌑</span>
+        <input type="range" id="setting-brightness" min="0.2" max="1.2" step="0.05" value="0.55"
+          style="flex:1;accent-color:var(--cyan);cursor:pointer;"
+          oninput="setBrightness(this.value)"/>
+        <span>☀️</span>
+        <span id="brightness-val" style="font-family:var(--font-hud);font-size:10px;color:var(--cyan);width:32px;">55%</span>
+      </div>
+    </div>
+    <div class="setting-row">
+      <div><div class="setting-label">Mostra posizione</div>
+        <div class="setting-sub">Amici possono vedere dove sei</div></div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="setting-share-pos" checked onchange="saveSettings()"/>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="setting-row">
+      <div><div class="setting-label">Aggiornamento GPS</div>
+        <div class="setting-sub">Tracking posizione automatico</div></div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="setting-auto-gps" onchange="toggleAutoGPS()"/>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="setting-row">
+      <div><div class="setting-label">Stato online</div>
+        <div class="setting-sub">Visibile agli amici</div></div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="setting-online-status" checked onchange="saveSettings()"/>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="setting-row">
+      <div><div class="setting-label">Nomi luoghi generici</div>
+        <div class="setting-sub">Es. "Aeroporto" invece del nome completo</div></div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="setting-generic-labels" onchange="toggleGenericLabels()"/>
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="section-label">Account</div>
+    <!-- Username change -->
+    <div style="background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:14px;margin-bottom:10px;">
+      <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;">USERNAME ATTUALE</div>
+      <div style="font-family:var(--font-ui);font-weight:700;font-size:16px;color:var(--white);margin-bottom:10px;" id="current-username-display">—</div>
+      <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:5px;">NUOVO USERNAME</div>
+      <div style="display:flex;gap:6px;">
+        <input id="new-username-input" maxlength="20"
+          placeholder="Nuovo nome..."
+          style="flex:1;background:rgba(5,10,14,0.9);border:1px solid var(--border);border-radius:3px;
+            color:var(--white);font-family:var(--font-ui);font-size:13px;font-weight:500;
+            padding:8px 10px;outline:none;transition:border-color 0.2s;"
+          onfocus="this.style.borderColor='var(--cyan)'"
+          onblur="this.style.borderColor='var(--border)'"
+        />
+        <button onclick="changeUsername()"
+          style="background:rgba(0,245,212,0.1);border:1px solid #00f5d433;border-radius:3px;
+            color:var(--cyan);font-family:var(--font-ui);font-weight:700;font-size:11px;
+            letter-spacing:1.5px;padding:8px 12px;cursor:pointer;white-space:nowrap;
+            transition:background 0.2s;text-transform:uppercase;"
+          onmouseover="this.style.background='rgba(0,245,212,0.22)'"
+          onmouseout="this.style.background='rgba(0,245,212,0.1)'"
+        >SALVA</button>
+      </div>
+      <div id="username-msg" style="display:none;font-family:var(--font-hud);font-size:10px;margin-top:6px;padding:5px 8px;border-radius:2px;"></div>
+    </div>
+    <button class="danger-btn" onclick="doLogout()">✕ Disconnetti</button>
+  </div>
+</div>
+
+<!-- ══ GAMES PANEL ════════════════════════════════════════ -->
+<div class="side-panel" id="panel-games">
+  <div class="panel-head">
+    <div class="panel-head-title" style="color:var(--orange);">🎮 Modalità Giochi</div>
+    <button class="panel-close" onclick="switchTab('map')">✕</button>
+  </div>
+  <div class="panel-scroll" id="games-main-view">
+
+    <!-- GIOCO 1: GIRO DEL QUARTIERE -->
+    <div class="game-card" id="game-zone-card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <span style="font-size:22px;">🏴</span>
+        <div>
+          <div class="game-title">GIRO DEL QUARTIERE</div>
+          <div style="font-family:var(--font-hud);font-size:8px;color:var(--orange);letter-spacing:1px;">GPS REALE • LOBBY MULTIPLAYER</div>
+        </div>
+      </div>
+      <div class="game-desc">
+        Esci di casa e fai il <b style="color:var(--white)">giro più grande possibile</b> tornando al punto di partenza.<br/>
+        Vince chi chiude l'area maggiore prima che il tempo scada.<br/>
+        Tutti i partecipanti visibili sulla mappa in tempo reale!
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="game-btn start" onclick="openGameLobby('zone')">🏟 CREA LOBBY</button>
+        <button class="game-btn" style="background:rgba(0,144,255,0.1);border-color:#0090ff44;color:var(--blue);" onclick="openJoinLobby('zone')">🔗 UNISCITI</button>
+      </div>
+    </div>
+
+    <!-- GIOCO 2: LINEA RETTA -->
+    <div class="game-card" id="game-line-card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <span style="font-size:22px;">📏</span>
+        <div>
+          <div class="game-title">LINEA RETTA</div>
+          <div style="font-family:var(--font-hud);font-size:8px;color:var(--orange);letter-spacing:1px;">GPS REALE • LOBBY MULTIPLAYER</div>
+        </div>
+      </div>
+      <div class="game-desc">
+        Cammina in <b style="color:var(--white)">linea retta il più lontano possibile</b> senza mai girare.<br/>
+        Vince chi copre la distanza rettilinea maggiore.<br/>
+        Il tuo percorso reale viene tracciato sul GPS!
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="game-btn start" onclick="openGameLobby('line')">🏟 CREA LOBBY</button>
+        <button class="game-btn" style="background:rgba(0,144,255,0.1);border-color:#0090ff44;color:var(--blue);" onclick="openJoinLobby('line')">🔗 UNISCITI</button>
+      </div>
+    </div>
+
+    <!-- GIOCO 3: NASCONDINO -->
+    <div class="game-card" id="game-hide-card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <span style="font-size:22px;">🙈</span>
+        <div>
+          <div class="game-title" style="color:var(--purple);">NASCONDINO</div>
+          <div style="font-family:var(--font-hud);font-size:8px;color:var(--purple);letter-spacing:1px;">GPS REALE • 2 GIOCATORI</div>
+        </div>
+      </div>
+      <div class="game-desc">
+        Uno si <b style="color:var(--white)">nasconde</b>, l'altro <b style="color:var(--white)">cerca</b>. Ruoli assegnati casualmente.<br/>
+        Il nascosto manda un ping periodico. Se esce dall'area viene visibile per 30 sec.<br/>
+        Torna alla base per 3 minuti totali per vincere!
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="game-btn" style="background:rgba(168,85,247,0.15);border-color:#a855f755;color:var(--purple);" onclick="openHideLobby()">🏟 CREA LOBBY</button>
+        <button class="game-btn" style="background:rgba(0,144,255,0.1);border-color:#0090ff44;color:var(--blue);" onclick="joinHideLobby()">🔗 UNISCITI</button>
+      </div>
+    </div>
+
+    <!-- CLASSIFICA -->
+    <div class="section-label">🏆 Record tra Amici</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;">
+      <button class="game-btn start" style="flex:1;padding:8px;" onclick="showLeaderboard('zone')">🏴 Giro</button>
+      <button class="game-btn start" style="flex:1;padding:8px;" onclick="showLeaderboard('line')">📏 Linea</button>
+      <button class="game-btn start" style="flex:1;padding:8px;" onclick="showLeaderboard('hide')">🙈 Nascondino</button>
+    </div>
+    <div id="games-leaderboard-panel">
+      <div class="empty-state">Gioca con gli amici per vedere la classifica!</div>
+    </div>
+
+  </div>
+
+  <!-- ══ NASCONDINO SETUP VIEW ══ -->
+  <div id="hide-setup-view" style="display:none;flex-direction:column;height:100%;">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+      <button onclick="closeHideSetup()" style="background:none;border:none;color:var(--dim);font-size:16px;cursor:pointer;">←</button>
+      <div style="font-family:var(--font-ui);font-weight:700;font-size:14px;color:var(--purple);">🙈 NASCONDINO — SETUP</div>
+    </div>
+    <div style="padding:14px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px;">
+
+      <!-- Codice lobby -->
+      <div>
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;">CODICE LOBBY</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div id="hide-code-badge" style="font-family:var(--font-ui);font-weight:700;font-size:22px;color:var(--purple);
+            background:rgba(168,85,247,0.1);border:1px solid #a855f755;border-radius:3px;padding:6px 16px;
+            cursor:pointer;flex:1;text-align:center;" onclick="copyHideCode()" title="Copia">—</div>
+          <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);">TAP PER COPIARE</div>
+        </div>
+      </div>
+
+      <!-- Giocatori -->
+      <div>
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;">GIOCATORI</div>
+        <div id="hide-players-list" style="display:flex;flex-direction:column;gap:5px;"></div>
+      </div>
+
+      <!-- Raggio area -->
+      <div>
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;">RAGGIO AREA DI GIOCO</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="hide-opt active" data-val="500" onclick="selectHideOpt(this,'radius',500)">500m</button>
+          <button class="hide-opt" data-val="750" onclick="selectHideOpt(this,'radius',750)">750m</button>
+          <button class="hide-opt" data-val="1000" onclick="selectHideOpt(this,'radius',1000)">1 km</button>
+          <button class="hide-opt" data-val="1500" onclick="selectHideOpt(this,'radius',1500)">1.5 km</button>
+        </div>
+      </div>
+
+      <!-- Frequenza ping -->
+      <div>
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;">PING DEL NASCOSTO (ogni...)</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="hide-opt active" data-val="30" onclick="selectHideOpt(this,'ping',30)">30 sec</button>
+          <button class="hide-opt" data-val="60" onclick="selectHideOpt(this,'ping',60)">1 min</button>
+          <button class="hide-opt" data-val="120" onclick="selectHideOpt(this,'ping',120)">2 min</button>
+          <button class="hide-opt" data-val="180" onclick="selectHideOpt(this,'ping',180)">3 min</button>
+        </div>
+      </div>
+
+      <!-- Durata partita -->
+      <div>
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;">DURATA PARTITA</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="hide-opt active" data-val="600" onclick="selectHideOpt(this,'duration',600)">10 min</button>
+          <button class="hide-opt" data-val="900" onclick="selectHideOpt(this,'duration',900)">15 min</button>
+          <button class="hide-opt" data-val="1200" onclick="selectHideOpt(this,'duration',1200)">20 min</button>
+          <button class="hide-opt" data-val="1800" onclick="selectHideOpt(this,'duration',1800)">30 min</button>
+        </div>
+      </div>
+
+      <!-- Raggio cattura -->
+      <div>
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;">RAGGIO DI CATTURA</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="hide-opt active" data-val="10" onclick="selectHideOpt(this,'capture',10)">10m</button>
+          <button class="hide-opt" data-val="20" onclick="selectHideOpt(this,'capture',20)">20m</button>
+          <button class="hide-opt" data-val="30" onclick="selectHideOpt(this,'capture',30)">30m</button>
+          <button class="hide-opt" data-val="50" onclick="selectHideOpt(this,'capture',50)">50m</button>
+        </div>
+      </div>
+
+      <div id="hide-status-msg" style="font-family:var(--font-hud);font-size:10px;color:var(--dim);letter-spacing:1px;text-align:center;">In attesa di giocatori...</div>
+      <button id="btn-hide-start" class="game-btn start" style="width:100%;padding:14px;font-size:14px;display:none;" onclick="startHideGame()">▶ INIZIA NASCONDINO</button>
+      <button id="btn-hide-ready" class="game-btn" style="width:100%;padding:12px;background:rgba(168,85,247,0.1);border-color:#a855f744;color:var(--purple);" onclick="toggleHideReady()">✓ PRONTO</button>
+    </div>
+  </div>
+
+  <!-- ══ NASCONDINO ACTIVE VIEW ══ -->
+  <div id="hide-active-view" style="display:none;flex-direction:column;height:100%;">
+    <div style="padding:10px 14px;border-bottom:1px solid var(--border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="font-family:var(--font-ui);font-weight:700;font-size:14px;color:var(--purple);" id="hide-role-display">—</div>
+        <div id="hide-timer-display" style="font-family:var(--font-hud);font-size:20px;color:var(--red);animation:flash 1s ease-in-out infinite;">00:00</div>
+      </div>
+    </div>
+    <div style="padding:12px 14px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;">
+      <div id="hide-ping-countdown" style="font-family:var(--font-hud);font-size:11px;color:var(--cyan);letter-spacing:1px;text-align:center;display:none;">
+        📡 Prossimo ping: <span id="hide-ping-secs">—</span>
+      </div>
+      <div id="hide-info-box" style="background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:12px;font-family:var(--font-hud);font-size:10px;color:var(--white);letter-spacing:1px;line-height:1.8;"></div>
+      <div id="hide-base-timer-box" style="display:none;background:rgba(168,85,247,0.08);border:1px solid #a855f733;border-radius:4px;padding:10px;text-align:center;">
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--purple);letter-spacing:1.5px;margin-bottom:4px;">TEMPO ALLA BASE</div>
+        <div id="hide-base-secs" style="font-family:var(--font-ui);font-weight:700;font-size:24px;color:var(--purple);">0s / 180s</div>
+      </div>
+    </div>
+    <div style="padding:10px 14px;border-top:1px solid var(--border);">
+      <button class="game-btn stop" style="width:100%;padding:12px;" onclick="abandonHideGame()">■ ABBANDONA</button>
+    </div>
+  </div>
+
+  <!-- LOBBY VIEW (hidden by default) -->
+  <div id="games-lobby-view" style="display:none;flex-direction:column;height:100%;">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+      <button onclick="closeLobby()" style="background:none;border:none;color:var(--dim);font-size:16px;cursor:pointer;">←</button>
+      <div>
+        <div style="font-family:var(--font-ui);font-weight:700;font-size:14px;color:var(--white);" id="lobby-game-title">LOBBY</div>
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1px;" id="lobby-code-display">—</div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);">CODICE:</div>
+        <div id="lobby-code-badge" style="font-family:var(--font-ui);font-weight:700;font-size:16px;color:var(--orange);
+          background:rgba(255,149,0,0.1);border:1px solid #ff950055;border-radius:3px;padding:3px 10px;
+          cursor:pointer;" onclick="copyLobbyCode()" title="Copia codice">—</div>
+      </div>
+    </div>
+    <div style="padding:12px 14px;border-bottom:1px solid var(--border);">
+      <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;">GIOCATORI IN LOBBY</div>
+      <div id="lobby-players-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
+    <div style="padding:12px 14px;border-bottom:1px solid var(--border);">
+      <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:6px;">DURATA PARTITA</div>
+      <div style="display:flex;gap:6px;">
+        <button class="time-opt active" data-mins="5" onclick="selectTime(this,5)">5 min</button>
+        <button class="time-opt" data-mins="10" onclick="selectTime(this,10)">10 min</button>
+        <button class="time-opt" data-mins="20" onclick="selectTime(this,20)">20 min</button>
+        <button class="time-opt" data-mins="30" onclick="selectTime(this,30)">30 min</button>
+      </div>
+    </div>
+    <div style="padding:14px;margin-top:auto;">
+      <div id="lobby-status-msg" style="font-family:var(--font-hud);font-size:10px;color:var(--dim);
+        letter-spacing:1px;text-align:center;margin-bottom:10px;">In attesa di altri giocatori...</div>
+      <button id="btn-start-game" class="game-btn start" style="width:100%;padding:14px;font-size:14px;display:none;" onclick="startLobbyGame()">
+        ▶ INIZIA PARTITA
+      </button>
+      <button id="btn-ready" class="game-btn" style="width:100%;padding:14px;font-size:14px;
+        background:rgba(0,245,212,0.1);border-color:#00f5d433;color:var(--cyan);" onclick="toggleReady()">
+        ✓ PRONTO
+      </button>
+    </div>
+  </div>
+
+  <!-- ACTIVE GAME VIEW -->
+  <div id="games-active-view" style="display:none;flex-direction:column;height:100%;">
+    <div style="padding:10px 14px;border-bottom:1px solid var(--border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="font-family:var(--font-ui);font-weight:700;font-size:14px;color:var(--orange);" id="active-game-title">—</div>
+        <div id="game-timer-display" style="font-family:var(--font-hud);font-size:20px;color:var(--red);
+          text-shadow:0 0 10px #ff224466;animation:flash 1s ease-in-out infinite;">00:00</div>
+      </div>
+    </div>
+    <div style="padding:10px 14px;flex:1;overflow-y:auto;">
+      <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;">CLASSIFICA LIVE</div>
+      <div id="live-leaderboard" style="display:flex;flex-direction:column;gap:5px;"></div>
+    </div>
+    <div style="padding:10px 14px;border-top:1px solid var(--border);">
+      <div id="my-game-stat" style="font-family:var(--font-hud);font-size:11px;color:var(--cyan);
+        letter-spacing:1px;text-align:center;margin-bottom:8px;">GPS attivo...</div>
+      <button class="game-btn stop" style="width:100%;padding:12px;" onclick="abandonGame()">■ ABBANDONA</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Game overlay on map -->
+<div id="game-overlay"></div>
+
+
+<!-- ══ HUD ═══════════════════════════════════════════════ -->
+<div id="coords"><div id="lat-d">-- LAT</div><div id="lng-d">-- LNG</div></div>
+<div id="clock"></div>
+
+
+<!-- NAV Panel -->
+<div id="nav-panel">
+  <div class="nav-stripe"></div>
+  <div class="nav-body">
+    <div class="nav-field-lbl">▸ Partenza</div>
+    <div class="nav-input-wrap">
+      <input class="nav-input" id="orig-in" placeholder="Posizione partenza..." autocomplete="off" oninput="navSearch(this,'orig-res',setOrigin)"/>
+      <div class="nav-results" id="orig-res"></div>
+    </div>
+    <div class="nav-field-lbl">★ Destinazione</div>
+    <div class="nav-input-wrap">
+      <input class="nav-input" id="dest-in" placeholder="Dove vuoi andare..." autocomplete="off" oninput="navSearch(this,'dest-res',setDest)"/>
+      <div class="nav-results" id="dest-res"></div>
+    </div>
+    <div class="nav-btn-row">
+      <button class="nav-btn route" onclick="calcRoute()">CALCOLA</button>
+      <button class="nav-btn locate" onclick="locateMe()" title="La mia posizione">◎</button>
+      <button class="nav-btn clear" id="nav-clear" onclick="clearRoute()">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- Mission -->
+<div id="mission-area">
+  <div id="mission-badge">● MISSIONE ATTIVA</div>
+  <div id="route-info"><div id="route-dist">—</div><div id="route-time">—</div></div>
+  <button id="btn-mission" onclick="startMission()">► START MISSION</button>
+  <button id="btn-cancel-mission" onclick="cancelMission()">✕ ANNULLA</button>
+</div>
+
+<!-- Map Controls -->
+<div id="map-controls">
+  <button class="ctrl-btn" onclick="map.zoomIn()">+</button>
+  <button class="ctrl-btn" onclick="map.zoomOut()">−</button>
+  <div class="ctrl-sep"></div>
+  <button class="ctrl-btn" onclick="resetView()">⊕</button>
+</div>
+
+<div id="watermark">GTA MAP SOCIAL · OSM · SUPABASE</div>
+
+<!-- ══ MOBILE BOTTOM NAV ══════════════════════════════════ -->
+<nav id="mobile-nav">
+  <button class="mob-tab active" data-panel="map" onclick="switchTab('map')">
+    <span class="icon">🗺</span>
+    <span>MAPPA</span>
+  </button>
+  <button class="mob-tab" data-panel="friends" onclick="switchTab('friends')">
+    <span class="icon">👥</span>
+    <span>AMICI</span>
+    <span class="mob-badge" id="mob-req-badge">0</span>
+  </button>
+  <button class="mob-tab" data-panel="stats" onclick="switchTab('stats')">
+    <span class="icon">📊</span>
+    <span>STATS</span>
+  </button>
+  <button class="mob-tab" data-panel="games" onclick="switchTab('games')">
+    <span class="icon">🎮</span>
+    <span>GIOCHI</span>
+  </button>
+  <button class="mob-tab" data-panel="settings" onclick="switchTab('settings')">
+    <span class="icon">⚙</span>
+    <span>IMPOST.</span>
+  </button>
+</nav>
+
+<!-- ══ NAV DRAWER (mobile partenza/destinazione) ══════════ -->
+<button id="nav-drawer-toggle" onclick="toggleNavDrawer()" title="Navigazione">🧭</button>
+<div id="nav-drawer">
+  <div style="display:flex;gap:8px;margin-bottom:8px;">
+    <div style="flex:1;">
+      <div class="nav-field-lbl">▸ PARTENZA</div>
+      <div class="nav-input-wrap" style="margin-bottom:0;">
+        <input class="nav-input" id="mob-orig-in" placeholder="Posizione partenza..." autocomplete="off"
+          oninput="navSearch(this,'mob-orig-res', coords => { mobileOriginCoords=coords; })"/>
+        <div class="nav-results" id="mob-orig-res"></div>
+      </div>
+    </div>
+    <div style="flex:1;">
+      <div class="nav-field-lbl">★ DESTINAZIONE</div>
+      <div class="nav-input-wrap" style="margin-bottom:0;">
+        <input class="nav-input" id="mob-dest-in" placeholder="Dove vuoi andare..." autocomplete="off"
+          oninput="navSearch(this,'mob-dest-res', (coords,name) => { setDest(coords,name); document.getElementById('mob-dest-in').value=name||''; })"/>
+        <div class="nav-results" id="mob-dest-res"></div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;gap:6px;">
+    <button class="nav-btn route" style="flex:1;padding:10px;" onclick="calcRouteMobile()">CALCOLA</button>
+    <button class="nav-btn locate" style="padding:10px 14px;font-size:16px;" onclick="locateMe()">◎</button>
+    <button class="nav-btn clear" id="mob-nav-clear" style="padding:10px 12px;display:none;" onclick="clearRoute();document.getElementById('mob-nav-clear').style.display='none';">✕</button>
+  </div>
+</div>
+<div id="toast-container"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+//  CONFIG — INSERISCI QUI LE TUE CREDENZIALI SUPABASE
+// ══════════════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://kgguvbnzjkwhashwctrw.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_ary3IK0ok6fpOf71PMWS5w_VhBpuD2Z';
+// ══════════════════════════════════════════════════════════════
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ── STATE ───────────────────────────────────────────────
+let map, currentUser = null, userProfile = null;
+let playerMarker = null, destMarker = null, routeLayer = null;
+let originCoords = null, destCoords = null;
+let friendMarkers = {}, friendsData = [], pendingRequests = [];
+let locationChannel = null, gpsInterval = null;
+let routeCount = 0, sessionCount = 0;
+let searchDebounce, navDebounce = {};
+
+// ── AVATAR COLORS ────────────────────────────────────────
+const AVATAR_COLORS = ['#00f5d4','#ff9500','#a855f7','#0090ff','#39ff14','#ff2244','#ffd700','#ff6eb4'];
+const getColor = (str) => {
+  let h = 0;
+  for(let c of (str||'?')) h = (h*31 + c.charCodeAt(0)) & 0xffffffff;
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+};
+const initials = (name) => (name||'?').slice(0,2).toUpperCase();
+
+// ══════════════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════════════
+window.addEventListener('load', async () => {
+  initMap();
+  initClock();
+  loadBrightness();
+
+  // Check if Supabase is configured
+  if (SUPABASE_URL === 'YOUR_SUPABASE_URL') {
+    setTimeout(() => {
+      hideLoading();
+      showConfigWarning();
+    }, 1800);
+    return;
+  }
+
+  setTimeout(async () => {
+    hideLoading();
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      currentUser = session.user;
+      await loadProfile();
+      enterApp();
+    } else {
+      document.getElementById('auth-screen').style.display = 'flex';
+    }
+  }, 1800);
+});
+
+function showConfigWarning() {
+  document.getElementById('auth-screen').style.display = 'flex';
+  showMsg('login-msg','⚠ Configura SUPABASE_URL e SUPABASE_KEY nel codice','error');
+}
+
+function hideLoading() {
+  const el = document.getElementById('loading');
+  el.style.opacity = '0'; el.style.transition = 'opacity 0.7s';
+  setTimeout(() => el.style.display = 'none', 700);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  MAP INIT
+// ══════════════════════════════════════════════════════════════
+function initMap() {
+  map = L.map('map', { 
+    center:[41.9028,12.4964], 
+    zoom:6, 
+    minZoom:3, 
+    maxZoom:19, 
+    zoomControl:false, 
+    attributionControl:false,
+    worldCopyJump: true,
+  });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+    maxZoom:19,
+    noWrap: false
+  }).addTo(map);
+  // Solo click destro imposta destinazione, click sinistro solo naviga la mappa
+  map.on('contextmenu', e => {
+    e.originalEvent.preventDefault();
+    setDest([e.latlng.lat, e.latlng.lng], null);
+  });
+  map.on('mousemove', e => {
+    document.getElementById('lat-d').textContent = e.latlng.lat.toFixed(5)+' N';
+    document.getElementById('lng-d').textContent = e.latlng.lng.toFixed(5)+' E';
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  AUTH
+// ══════════════════════════════════════════════════════════════
+function switchAuthTab(tab) {
+  document.querySelectorAll('.auth-tab').forEach((t,i) => t.classList.toggle('active', (i===0&&tab==='login')||(i===1&&tab==='register')));
+  document.getElementById('form-login').classList.toggle('hidden', tab!=='login');
+  document.getElementById('form-register').classList.toggle('hidden', tab!=='register');
+}
+
+async function doRegister() {
+  const username = document.getElementById('reg-username').value.trim();
+  const email = document.getElementById('reg-email').value.trim();
+  const pass = document.getElementById('reg-pass').value;
+  if(!username||!email||!pass) return showMsg('reg-msg','Compila tutti i campi','error');
+  if(pass.length < 6) return showMsg('reg-msg','Password minimo 6 caratteri','error');
+  if(!/^[a-zA-Z0-9_]{3,20}$/.test(username)) return showMsg('reg-msg','Username: solo lettere, numeri e _ (3-20 caratteri)','error');
+
+  // Controlla unicità username
+  const { data: existing } = await sb.from('profiles').select('id').eq('username', username).maybeSingle();
+  if(existing) return showMsg('reg-msg','Username già in uso, scegline un altro!','error');
+
+  const { data, error } = await sb.auth.signUp({ email, password: pass,
+    options: { data: { username } } });
+  if(error) {
+    const msg = (error.message.toLowerCase().includes('already')||error.message.toLowerCase().includes('exists'))
+      ? 'Email già registrata. Prova ad accedere!' : error.message;
+    return showMsg('reg-msg', msg, 'error');
+  }
+
+  // Create profile
+  if(data.user) {
+    await sb.from('profiles').upsert({
+      id: data.user.id, username, email,
+      avatar_color: getColor(username),
+      online: true, share_location: true,
+      lat: null, lng: null, updated_at: new Date().toISOString()
+    });
+    if(data.session) {
+      currentUser = data.user;
+      await loadProfile();
+      document.getElementById('auth-screen').style.display = 'none';
+      enterApp();
+    } else {
+      showMsg('reg-msg','✓ Registrazione completata! Controlla la tua email per confermare.','success');
+    }
+  } else {
+    showMsg('reg-msg','Controlla la tua email per confermare','success');
+  }
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  if(!email||!pass) return showMsg('login-msg','Inserisci email e password','error');
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+  if(error) return showMsg('login-msg', error.message==='Invalid login credentials'?'Email o password errati':error.message, 'error');
+
+  currentUser = data.user;
+  await loadProfile();
+  document.getElementById('auth-screen').style.display = 'none';
+  enterApp();
+}
+
+async function doLogout() {
+  if(currentUser) {
+    await sb.from('profiles').update({ online: false }).eq('id', currentUser.id);
+  }
+  stopLocationTracking();
+  await sb.auth.signOut();
+  location.reload();
+}
+
+function showMsg(id, msg, type) {
+  const el = document.getElementById(id);
+  el.textContent = msg; el.className = 'auth-msg '+type; el.style.display = 'block';
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PROFILE & ENTER APP
+// ══════════════════════════════════════════════════════════════
+async function loadProfile() {
+  const { data } = await sb.from('profiles').select('*').eq('id', currentUser.id).single();
+  if(data) {
+    userProfile = data;
+  } else {
+    const username = currentUser.user_metadata?.username || currentUser.email?.split('@')[0] || 'Player';
+    userProfile = { id: currentUser.id, username, avatar_color: getColor(username), online: true, share_location: true };
+    await sb.from('profiles').upsert({ ...userProfile, email: currentUser.email, lat:null, lng:null });
+  }
+}
+
+function enterApp() {
+  const u = userProfile;
+  const col = u.avatar_color || getColor(u.username);
+  document.getElementById('user-avatar').textContent = initials(u.username);
+  document.getElementById('user-avatar').style.background = col;
+  document.getElementById('user-name-display').textContent = u.username;
+  document.getElementById('stat-username').textContent = u.username;
+  document.getElementById('stat-uid').textContent = currentUser.id.slice(0,16)+'...';
+  document.getElementById('current-username-display').textContent = u.username;
+  sessionCount++;
+  document.getElementById('stat-sessions').textContent = sessionCount;
+
+  // Mark online
+  sb.from('profiles').update({ online: true, updated_at: new Date().toISOString() })
+    .eq('id', currentUser.id);
+
+  loadFriends();
+  subscribeRealtime();
+  loadSavedStats();
+  updateLeaderboard();
+  toast('Benvenuto, '+u.username+'!', 'ok');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  FRIENDS
+// ══════════════════════════════════════════════════════════════
+async function loadFriends() {
+  if(!currentUser) return;
+
+  // Get accepted friendships
+  const { data: fs } = await sb.from('friendships')
+    .select(`id, user_id, friend_id, status,
+      profiles!friendships_friend_id_fkey(id,username,avatar_color,online,lat,lng,share_location),
+      profiles!friendships_user_id_fkey(id,username,avatar_color,online,lat,lng,share_location)`)
+    .or(`user_id.eq.${currentUser.id},friend_id.eq.${currentUser.id}`)
+    .eq('status','accepted');
+
+  friendsData = (fs||[]).map(f => {
+    const isSender = f.user_id === currentUser.id;
+    return { ...( isSender ? f['profiles!friendships_friend_id_fkey'] : f['profiles!friendships_user_id_fkey'] ),
+      friendship_id: f.id };
+  }).filter(Boolean);
+
+  renderFriends();
+  updateFriendMarkers();
+  document.getElementById('stat-friends').textContent = friendsData.length;
+
+  // Pending requests
+  const { data: reqs } = await sb.from('friendships')
+    .select(`id, user_id, profiles!friendships_user_id_fkey(id,username,avatar_color)`)
+    .eq('friend_id', currentUser.id)
+    .eq('status','pending');
+
+  pendingRequests = reqs || [];
+  renderRequests();
+  updateOnlineCount();
+}
+
+function renderFriends() {
+  const el = document.getElementById('friends-list');
+  if(!friendsData.length) { el.innerHTML = '<div class="empty-state">Nessun amico ancora.<br/>Cerca un giocatore sopra!</div>'; return; }
+  el.innerHTML = friendsData.map(f => {
+    const col = f.avatar_color || getColor(f.username);
+    const online = f.online;
+    return `<div class="friend-card ${online?'online':'offline'}">
+      <div class="f-avatar" style="background:${col}">
+        ${initials(f.username)}
+        <div class="f-status-dot ${online?'online':'offline'}"></div>
+      </div>
+      <div class="f-info">
+        <div class="f-name">${f.username}</div>
+        <div class="f-status ${online?'online':'offline'}">${online?'● ONLINE':'○ OFFLINE'}</div>
+      </div>
+      <div class="f-actions">
+        ${(f.online && f.share_location && f.lat) ? `<button class="fa-btn locate" onclick="flyToFriend(${f.lat},${f.lng})" title="Vedi sulla mappa">📍</button>` : ''}
+        <button class="fa-btn remove" onclick="removeFriend('${f.friendship_id}')" title="Rimuovi">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('stat-online').textContent = friendsData.filter(f=>f.online).length;
+}
+
+function renderRequests() {
+  const sec = document.getElementById('requests-section');
+  const el = document.getElementById('requests-list');
+  if(!pendingRequests.length) { sec.style.display='none'; document.querySelector('#req-badge').classList.remove('visible'); syncMobileBadge(0); return; }
+  sec.style.display='block';
+  const badge = document.getElementById('req-badge');
+  badge.textContent = pendingRequests.length;
+  badge.classList.add('visible');
+  syncMobileBadge(pendingRequests.length);
+  el.innerHTML = pendingRequests.map(r => {
+    const p = r['profiles!friendships_user_id_fkey'];
+    if(!p) return '';
+    const col = p.avatar_color || getColor(p.username);
+    return `<div class="req-card">
+      <div class="f-avatar" style="background:${col};width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--font-ui);font-weight:700;font-size:13px;color:var(--bg);">${initials(p.username)}</div>
+      <div style="flex:1;min-width:0;font-family:var(--font-ui);font-weight:600;font-size:13px;color:var(--white);">${p.username}</div>
+      <div class="req-actions">
+        <button class="req-btn-accept" onclick="acceptFriend('${r.id}')">✓</button>
+        <button class="req-btn-decline" onclick="declineFriend('${r.id}')">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function searchUsers(q) {
+  clearTimeout(searchDebounce);
+  const res = document.getElementById('user-results');
+  if(q.length < 2) { res.classList.remove('open'); return; }
+  searchDebounce = setTimeout(async () => {
+    const { data } = await sb.from('profiles')
+      .select('id,username,avatar_color,online')
+      .ilike('username', `%${q}%`)
+      .neq('id', currentUser.id)
+      .limit(6);
+    if(!data?.length) { res.classList.remove('open'); return; }
+
+    // Check existing friendships
+    const { data: existing } = await sb.from('friendships')
+      .select('user_id,friend_id,status')
+      .or(`user_id.eq.${currentUser.id},friend_id.eq.${currentUser.id}`);
+    const existingIds = new Set((existing||[]).flatMap(f => [f.user_id, f.friend_id]));
+
+    res.innerHTML = data.map(u => {
+      const col = u.avatar_color || getColor(u.username);
+      const alreadyFriend = existingIds.has(u.id);
+      return `<div class="dropdown-item">
+        <div class="d-avatar" style="background:${col}">${initials(u.username)}</div>
+        <div class="d-name">${u.username}</div>
+        ${alreadyFriend
+          ? `<span style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1px;">GIÀ AMICO</span>`
+          : `<button class="d-btn" onclick="sendRequest('${u.id}','${u.username}')">+ AGGIUNGI</button>`
+        }
+      </div>`;
+    }).join('');
+    res.classList.add('open');
+  }, 300);
+}
+
+async function sendRequest(toId, toName) {
+  const { error } = await sb.from('friendships').insert({
+    user_id: currentUser.id, friend_id: toId, status: 'pending'
+  });
+  if(error) { toast('Errore invio richiesta', 'err'); return; }
+  toast(`Richiesta inviata a ${toName}!`, 'info');
+  document.getElementById('user-results').classList.remove('open');
+  document.getElementById('user-search').value = '';
+}
+
+async function acceptFriend(requestId) {
+  await sb.from('friendships').update({ status:'accepted' }).eq('id', requestId);
+  toast('Amico aggiunto!', 'ok');
+  loadFriends();
+}
+
+async function declineFriend(requestId) {
+  await sb.from('friendships').delete().eq('id', requestId);
+  loadFriends();
+}
+
+async function removeFriend(friendshipId) {
+  if(!confirm('Rimuovere questo amico?')) return;
+  await sb.from('friendships').delete().eq('id', friendshipId);
+  toast('Amico rimosso', 'info');
+  loadFriends();
+}
+
+function flyToFriend(lat, lng) {
+  if(!lat||!lng) return;
+  map.flyTo([lat,lng], 15, { duration:2 });
+  switchTab('map');
+  toast('Volando da amico...', 'info');
+}
+
+function updateOnlineCount() {
+  updateOnlineDisplay();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  FRIEND MARKERS ON MAP
+// ══════════════════════════════════════════════════════════════
+function updateFriendMarkers() {
+  friendsData.forEach(f => {
+    if(!f.lat || !f.lng || !f.share_location) {
+      if(friendMarkers[f.id]) { map.removeLayer(friendMarkers[f.id]); delete friendMarkers[f.id]; }
+      return;
+    }
+    const col = f.avatar_color || getColor(f.username);
+    const html = `<div class="friend-marker-wrap">
+      <div class="friend-avatar-m" style="background:${col}">
+        ${initials(f.username)}
+        <div class="friend-status-m ${f.online?'online':'offline'}"></div>
+      </div>
+      <div class="friend-label-m">${f.username}</div>
+    </div>`;
+    const icon = L.divIcon({ className:'', html, iconSize:[50,50], iconAnchor:[16,44] });
+
+    if(friendMarkers[f.id]) {
+      friendMarkers[f.id].setLatLng([f.lat, f.lng]);
+      friendMarkers[f.id].setIcon(icon);
+    } else {
+      friendMarkers[f.id] = L.marker([f.lat, f.lng], { icon, zIndexOffset:800 })
+        .bindPopup(`<b style="font-family:'Rajdhani',sans-serif;font-size:14px;">${f.username}</b><br/><span style="font-size:11px;color:#888;">${f.online?'Online':'Offline'}</span>`)
+        .addTo(map);
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  REALTIME SUBSCRIPTIONS
+// ══════════════════════════════════════════════════════════════
+function subscribeRealtime() {
+  // Subscribe to location updates of friends
+  locationChannel = sb.channel('locations')
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'profiles' },
+      payload => {
+        const updated = payload.new;
+        // Is this a friend?
+        const idx = friendsData.findIndex(f => f.id === updated.id);
+        if(idx !== -1) {
+          friendsData[idx] = { ...friendsData[idx], ...updated };
+          updateFriendMarkers();
+          renderFriends();
+          updateOnlineCount();
+        }
+      }
+    )
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'friendships' },
+      payload => {
+        if(payload.new.friend_id === currentUser.id) {
+          loadFriends(); // Reload to get new request
+          toast('Nuova richiesta di amicizia!', 'info');
+        }
+      }
+    )
+    .subscribe();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  GPS LOCATION SHARING
+// ══════════════════════════════════════════════════════════════
+function locateMe() {
+  if(!navigator.geolocation) { toast('Geolocalizzazione non supportata','err'); return; }
+  navigator.geolocation.getCurrentPosition(pos => {
+    const { latitude: lat, longitude: lng } = pos.coords;
+    placePlayerMarker([lat, lng]);
+    map.flyTo([lat,lng], 15, { duration:2 });
+
+    // Share to Supabase if enabled
+    const sharePos = document.getElementById('setting-share-pos').checked;
+    if(currentUser && sharePos) {
+      sb.from('profiles').update({ lat, lng, updated_at: new Date().toISOString() })
+        .eq('id', currentUser.id);
+    }
+  }, () => toast('Posizione non disponibile','err'), { enableHighAccuracy:true });
+}
+
+function toggleAutoGPS() {
+  const enabled = document.getElementById('setting-auto-gps').checked;
+  if(enabled) startLocationTracking();
+  else stopLocationTracking();
+}
+
+function startLocationTracking() {
+  if(gpsInterval) return;
+  locateMe();
+  gpsInterval = setInterval(locateMe, 10000); // every 10s
+  toast('GPS automatico attivato','ok');
+}
+
+function stopLocationTracking() {
+  if(gpsInterval) { clearInterval(gpsInterval); gpsInterval = null; }
+}
+
+function placePlayerMarker(latlng) {
+  if(playerMarker) map.removeLayer(playerMarker);
+  const icon = L.divIcon({
+    className:'',
+    html:`<div class="player-wrap"><div class="player-dot"></div><div class="player-ring"></div><div class="player-ring r2"></div></div>`,
+    iconSize:[20,20], iconAnchor:[10,10]
+  });
+  playerMarker = L.marker(latlng, { icon, zIndexOffset:1000 }).addTo(map);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  CHANGE USERNAME
+// ══════════════════════════════════════════════════════════════
+async function changeUsername() {
+  const newName = document.getElementById('new-username-input').value.trim();
+  const msgEl = document.getElementById('username-msg');
+
+  const showUsernameMsg = (msg, type) => {
+    msgEl.textContent = msg;
+    msgEl.style.display = 'block';
+    msgEl.style.color = type === 'error' ? 'var(--red)' : 'var(--green)';
+    msgEl.style.background = type === 'error' ? 'rgba(255,34,68,0.1)' : 'rgba(57,255,20,0.1)';
+    setTimeout(() => msgEl.style.display = 'none', 3000);
+  };
+
+  if(!newName) return showUsernameMsg('Inserisci un nuovo username', 'error');
+  if(!/^[a-zA-Z0-9_]{3,20}$/.test(newName)) return showUsernameMsg('Solo lettere, numeri e _ (3-20 caratteri)', 'error');
+  if(newName === userProfile.username) return showUsernameMsg('È già il tuo username!', 'error');
+
+  // Controlla unicità
+  const { data: existing } = await sb.from('profiles').select('id').eq('username', newName).maybeSingle();
+  if(existing) return showUsernameMsg('Username già in uso!', 'error');
+
+  // Aggiorna nel DB
+  const { error } = await sb.from('profiles')
+    .update({ username: newName, avatar_color: getColor(newName) })
+    .eq('id', currentUser.id);
+
+  if(error) return showUsernameMsg('Errore aggiornamento', 'error');
+
+  // Aggiorna stato locale
+  userProfile.username = newName;
+  userProfile.avatar_color = getColor(newName);
+
+  // Aggiorna tutti gli elementi UI
+  document.getElementById('user-avatar').textContent = initials(newName);
+  document.getElementById('user-avatar').style.background = getColor(newName);
+  document.getElementById('user-name-display').textContent = newName;
+  document.getElementById('stat-username').textContent = newName;
+  document.getElementById('current-username-display').textContent = newName;
+  document.getElementById('new-username-input').value = '';
+
+  showUsernameMsg('✓ Username aggiornato!', 'ok');
+  toast('Username cambiato in ' + newName + '!', 'ok');
+}
+
+async function saveSettings() {
+  if(!currentUser) return;
+  const sharePos = document.getElementById('setting-share-pos').checked;
+  if(!sharePos && currentUser) {
+    // Clear location from DB
+    await sb.from('profiles').update({ lat:null, lng:null, share_location:false }).eq('id',currentUser.id);
+  } else {
+    await sb.from('profiles').update({ share_location:true }).eq('id',currentUser.id);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  GENERIC LABELS
+// ══════════════════════════════════════════════════════════════
+// Dizionario parole chiave → nome generico
+const LABEL_MAP = [
+  { k: /aeroporto|airport/i,          v: 'Aeroporto' },
+  { k: /stazione|ferrovia|treno/i,     v: 'Stazione' },
+  { k: /ospedale|hospital|clinica/i,   v: 'Ospedale' },
+  { k: /università|universit|campus/i, v: 'Università' },
+  { k: /museo|museum/i,                v: 'Museo' },
+  { k: /chiesa|duomo|basilica|cattedrale/i, v: 'Chiesa' },
+  { k: /parco|park|giardino/i,         v: 'Parco' },
+  { k: /porto|port|marina/i,           v: 'Porto' },
+  { k: /stadio|stadium|arena/i,        v: 'Stadio' },
+  { k: /autostrada|raccordo/i,         v: 'Autostrada' },
+  { k: /supermercato|market|centro commerciale/i, v: 'Centro Commerciale' },
+  { k: /scuola|istituto|liceo|istruzione/i, v: 'Scuola' },
+  { k: /biblioteca|library/i,          v: 'Biblioteca' },
+  { k: /hotel|albergo/i,               v: 'Hotel' },
+  { k: /cimitero|cemetery/i,           v: 'Cimitero' },
+  { k: /piscina|swimming/i,            v: 'Piscina' },
+  { k: /palestra|gym|sport/i,          v: 'Palestra' },
+  { k: /farmacia|pharmacy/i,           v: 'Farmacia' },
+  { k: /ristorante|restaurant|pizzeria/i, v: 'Ristorante' },
+  { k: /bar|caffè|caffe/i,             v: 'Bar' },
+];
+
+function simplifyLabel(name) {
+  if(!name) return name;
+  for(const rule of LABEL_MAP) {
+    if(rule.k.test(name)) return rule.v;
+  }
+  // Fallback: prendi solo la prima parola significativa (>3 caratteri)
+  const parts = name.split(/[\s,\-\/]+/);
+  const main = parts.find(p => p.length > 3) || parts[0];
+  return main.charAt(0).toUpperCase() + main.slice(1).toLowerCase();
+}
+
+function setBrightness(val) {
+  document.documentElement.style.setProperty('--map-brightness', val);
+  document.getElementById('brightness-val').textContent = Math.round(val*100)+'%';
+  localStorage.setItem('mapBrightness', val);
+}
+function loadBrightness() {
+  const v = localStorage.getItem('mapBrightness');
+  if(v){ document.getElementById('setting-brightness').value=v; setBrightness(v); }
+}
+
+function toggleGenericLabels() {
+  const enabled = document.getElementById('setting-generic-labels').checked;
+  localStorage.setItem('genericLabels', enabled);
+  // Aggiorna i risultati di ricerca già aperti se visibili
+  toast(enabled ? 'Nomi generici attivati' : 'Nomi completi attivati', 'info');
+}
+
+function isGenericLabels() {
+  return document.getElementById('setting-generic-labels')?.checked || false;
+}
+
+function formatPlaceName(fullName) {
+  if(!fullName) return '';
+  if(isGenericLabels()) return simplifyLabel(fullName);
+  return fullName;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  NAVIGATION
+// ══════════════════════════════════════════════════════════════
+let navSearchDbs = {};
+function navSearch(input, resId, callback) {
+  clearTimeout(navSearchDbs[resId]);
+  const q = input.value;
+  const res = document.getElementById(resId);
+  if(q.length < 3) { res.classList.remove('open'); return; }
+  navSearchDbs[resId] = setTimeout(async () => {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5`;
+    const r = await fetch(url, { headers:{'Accept-Language':'it'} });
+    const data = await r.json();
+    if(!data.length) { res.classList.remove('open'); return; }
+    res.innerHTML = data.map(item => {
+      const rawName = item.display_name.split(',')[0];
+      const name = formatPlaceName(rawName);
+      const addr = isGenericLabels()
+        ? item.display_name.split(',').slice(1,3).join(',').trim()
+        : item.display_name.split(',').slice(1,3).join(',').trim();
+      return `<div class="nav-result-item" onclick="handleNavSelect(${item.lat},${item.lon},'${name.replace(/'/g,"\\'")}','${resId}',this)">
+        <div class="nav-result-name">${name}</div>
+        <div class="nav-result-addr">${addr}</div>
+      </div>`;
+    }).join('');
+    res.classList.add('open');
+  }, 350);
+}
+
+function handleNavSelect(lat, lng, name, resId, el) {
+  document.getElementById(resId).classList.remove('open');
+  const isOrig = resId === 'orig-res';
+  if(isOrig) {
+    document.getElementById('orig-in').value = name;
+    setOrigin([parseFloat(lat), parseFloat(lng)]);
+  } else {
+    document.getElementById('dest-in').value = name;
+    setDest([parseFloat(lat), parseFloat(lng)], name);
+  }
+  map.flyTo([parseFloat(lat), parseFloat(lng)], 14, { duration:1.5 });
+}
+
+function setOrigin(coords) { originCoords = coords; }
+
+function setDest(coords, name) {
+  destCoords = coords;
+  if(destMarker) map.removeLayer(destMarker);
+  const icon = L.divIcon({
+    className:'',
+    html:`<div class="dest-wrap"><div class="dest-pin">★</div></div>`,
+    iconSize:[28,34], iconAnchor:[14,34]
+  });
+  destMarker = L.marker(coords, { icon, zIndexOffset:900 }).addTo(map);
+}
+
+async function calcRoute() {
+  if(!originCoords || !destCoords) { toast('Imposta partenza e destinazione!','err'); return; }
+  const [oLat,oLng] = originCoords, [dLat,dLng] = destCoords;
+  try {
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${oLng},${oLat};${dLng},${dLat}?overview=full&geometries=geojson`);
+    const data = await r.json();
+    if(!data.routes?.length) { toast('Percorso non trovato','err'); return; }
+    const route = data.routes[0];
+    const coords = route.geometry.coordinates.map(c=>[c[1],c[0]]);
+    if(routeLayer) map.removeLayer(routeLayer);
+    const layers = [
+      L.polyline(coords, { color:'#ff9500', weight:24, opacity:0.07 }),
+      L.polyline(coords, { color:'#ffb700', weight:12, opacity:0.16 }),
+      L.polyline(coords, { color:'#ffe066', weight:5,  opacity:0.55 }),
+      L.polyline(coords, { color:'#fff8dc', weight:2,  opacity:1, dashArray:'10 8' }),
+    ];
+    routeLayer = L.layerGroup(layers).addTo(map);
+    map.fitBounds(L.polyline(coords).getBounds(), { padding:[80,80], animate:true, duration:2 });
+    const km = (route.distance/1000).toFixed(1);
+    const mins = Math.round(route.duration/60);
+    document.getElementById('route-dist').textContent = km+' km';
+    document.getElementById('route-time').textContent = mins>=60?`${Math.floor(mins/60)}h ${mins%60}min`:`${mins} min`;
+    document.getElementById('route-info').classList.add('visible');
+    document.getElementById('btn-mission').classList.add('visible');
+    document.getElementById('nav-clear').classList.add('show');
+    routeCount++;
+    document.getElementById('stat-routes').textContent = routeCount;
+    // Aggiorna statistiche km
+    addRouteStats(parseFloat(km), route.duration);
+  } catch(e) { toast('Errore percorso. Riprova!','err'); }
+}
+
+function clearRoute() {
+  if(routeLayer) { map.removeLayer(routeLayer); routeLayer=null; }
+  if(destMarker) { map.removeLayer(destMarker); destMarker=null; }
+  originCoords=null; destCoords=null;
+  document.getElementById('orig-in').value='';
+  document.getElementById('dest-in').value='';
+  ['route-info','btn-mission','mission-badge','btn-cancel-mission'].forEach(id=>document.getElementById(id).classList.remove('visible'));
+  document.getElementById('nav-clear').classList.remove('show');
+  document.getElementById('mission-overlay') && document.getElementById('mission-overlay').classList && null;
+}
+
+function startMission() {
+  document.getElementById('mission-badge').classList.add('visible');
+  document.getElementById('btn-mission').classList.remove('visible');
+  document.getElementById('btn-cancel-mission').classList.add('visible');
+  if(destCoords) map.flyTo(destCoords, 16, { animate:true, duration:3, easeLinearity:0.1 });
+  flashEffect();
+}
+
+function cancelMission() {
+  document.getElementById('mission-badge').classList.remove('visible');
+  document.getElementById('btn-cancel-mission').classList.remove('visible');
+  if(routeLayer) document.getElementById('btn-mission').classList.add('visible');
+}
+
+function flashEffect() {
+  const d = document.createElement('div');
+  d.style.cssText='position:fixed;inset:0;z-index:9990;background:rgba(255,149,0,0.15);pointer-events:none;';
+  d.style.animation='fadeout 0.8s ease forwards';
+  const s = document.createElement('style');
+  s.textContent='@keyframes fadeout{0%{opacity:1}100%{opacity:0}}';
+  document.head.appendChild(s);
+  document.body.appendChild(d);
+  setTimeout(()=>d.remove(),900);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  UI TABS
+// ══════════════════════════════════════════════════════════════
+function switchTab(tab) {
+  // Desktop tabs
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.panel===tab));
+  // Mobile tabs
+  document.querySelectorAll('.mob-tab').forEach(t => t.classList.toggle('active', t.dataset.panel===tab));
+  document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('open'));
+
+  const isMobile = window.innerWidth <= 768;
+  const navPanel = document.getElementById('nav-panel');
+  const missionArea = document.getElementById('mission-area');
+
+  if(tab==='friends') {
+    document.getElementById('panel-friends').classList.add('open');
+    if(!isMobile){ navPanel.style.left='316px'; navPanel.style.transform='none'; missionArea.style.display='none'; document.getElementById('map-controls').style.right='16px'; document.getElementById('map-controls').style.left='auto'; }
+  } else if(tab==='stats') {
+    document.getElementById('panel-stats').classList.add('open');
+    if(!isMobile){ navPanel.style.left='316px'; navPanel.style.transform='none'; missionArea.style.display='none'; document.getElementById('map-controls').style.right='16px'; document.getElementById('map-controls').style.left='auto'; }
+  } else if(tab==='games') {
+    document.getElementById('panel-games').classList.add('open');
+    if(!isMobile){ navPanel.style.left='316px'; navPanel.style.transform='none'; missionArea.style.display='none'; document.getElementById('map-controls').style.right='16px'; document.getElementById('map-controls').style.left='auto'; }
+  } else if(tab==='settings') {
+    document.getElementById('panel-settings').classList.add('open');
+    if(!isMobile){ navPanel.style.left='16px'; navPanel.style.transform='none'; missionArea.style.display='none'; document.getElementById('map-controls').style.right='auto'; document.getElementById('map-controls').style.left='16px'; }
+  } else {
+    if(!isMobile){ navPanel.style.left='16px'; navPanel.style.transform='none'; missionArea.style.display='flex'; document.getElementById('map-controls').style.right='16px'; document.getElementById('map-controls').style.left='auto'; }
+    else { missionArea.style.display='flex'; }
+  }
+}
+
+// ── MOBILE NAV DRAWER ────────────────────────────────────
+let navDrawerOpen = false;
+let mobileOriginCoords = null;
+
+function toggleNavDrawer() {
+  navDrawerOpen = !navDrawerOpen;
+  const drawer = document.getElementById('nav-drawer');
+  const btn = document.getElementById('nav-drawer-toggle');
+  drawer.classList.toggle('open', navDrawerOpen);
+  btn.textContent = navDrawerOpen ? '✕' : '🧭';
+  btn.style.background = navDrawerOpen ? 'var(--red)' : 'var(--orange)';
+}
+
+function calcRouteMobile() {
+  // Sync mobile inputs to main route system
+  if(mobileOriginCoords) originCoords = mobileOriginCoords;
+  calcRoute();
+  document.getElementById('mob-nav-clear').style.display = 'block';
+  toggleNavDrawer();
+}
+
+// Sync req badge to mobile
+function syncMobileBadge(count) {
+  const b = document.getElementById('mob-req-badge');
+  if(!b) return;
+  b.textContent = count;
+  b.classList.toggle('visible', count > 0);
+}
+
+// Click outside closes dropdowns
+document.addEventListener('click', e => {
+  if(!e.target.closest('.search-box') && !e.target.closest('#user-search'))
+    document.querySelectorAll('.search-dropdown,.nav-results').forEach(r=>r.classList.remove('open'));
+});
+
+// ══════════════════════════════════════════════════════════════
+//  CLOCK & HUD
+// ══════════════════════════════════════════════════════════════
+function initClock() {
+  const update = () => {
+    const n = new Date();
+    document.getElementById('clock').textContent =
+      String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+  };
+  update(); setInterval(update, 1000);
+}
+
+function resetView() {
+  // Vola alla posizione utente se disponibile, altrimenti Italia
+  if(playerMarker) {
+    const pos = playerMarker.getLatLng();
+    map.flyTo([pos.lat, pos.lng], 15, { duration:2 });
+  } else if(navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      map.flyTo([pos.coords.latitude, pos.coords.longitude], 15, { duration:2 });
+    }, () => map.flyTo([41.9028,12.4964],13,{duration:2}));
+  } else {
+    map.flyTo([41.9028,12.4964],13,{duration:2});
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  STATS — KM TRACKING
+// ══════════════════════════════════════════════════════════════
+let todayKm = 0, todaySecs = 0, totalKm = 0, totalSecs = 0;
+
+function addRouteStats(km, secs) {
+  todayKm += km; todaySecs += secs;
+  totalKm += km; totalSecs += secs;
+  updateStatsDisplay();
+  // Save to localStorage
+  const today = new Date().toDateString();
+  localStorage.setItem('gtamap_today_date', today);
+  localStorage.setItem('gtamap_today_km', todayKm);
+  localStorage.setItem('gtamap_today_secs', todaySecs);
+  localStorage.setItem('gtamap_total_km', totalKm);
+  localStorage.setItem('gtamap_total_secs', totalSecs);
+}
+
+function loadSavedStats() {
+  const savedDate = localStorage.getItem('gtamap_today_date');
+  const today = new Date().toDateString();
+  if(savedDate === today) {
+    todayKm = parseFloat(localStorage.getItem('gtamap_today_km')||0);
+    todaySecs = parseFloat(localStorage.getItem('gtamap_today_secs')||0);
+  }
+  totalKm = parseFloat(localStorage.getItem('gtamap_total_km')||0);
+  totalSecs = parseFloat(localStorage.getItem('gtamap_total_secs')||0);
+  updateStatsDisplay();
+}
+
+function formatTime(secs) {
+  if(!secs || secs < 60) return secs ? `${Math.round(secs)} sec` : '—';
+  const h = Math.floor(secs/3600);
+  const m = Math.floor((secs%3600)/60);
+  if(h > 0) return `${h}h ${m}min`;
+  return `${m} min`;
+}
+
+function updateStatsDisplay() {
+  const kmT = todayKm.toFixed(1);
+  const kmTot = totalKm.toFixed(1);
+  document.getElementById('stat-km-today').textContent = kmT + ' km';
+  document.getElementById('stat-time-today').textContent = todayKm > 0 ? `${kmT}km in ${formatTime(todaySecs)}` : '— min';
+  document.getElementById('stat-km-total').textContent = kmTot + ' km';
+  document.getElementById('stat-time-total').textContent = totalKm > 0 ? `${kmTot}km in ${formatTime(totalSecs)}` : '— min';
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ONLINE COUNT — show friends online
+// ══════════════════════════════════════════════════════════════
+function updateOnlineDisplay() {
+  const onlineCount = friendsData.filter(f => f.online).length;
+  const onlineEl = document.getElementById('online-num');
+  if(onlineEl) onlineEl.textContent = onlineCount;
+  // Also update stats panel
+  const subEl = document.getElementById('stat-online-sub');
+  if(subEl) subEl.textContent = onlineCount + ' online';
+}
+
+// ══════════════════════════════════════════════════════════════
+//  GAMES — MULTIPLAYER GPS LOBBY SYSTEM
+// ══════════════════════════════════════════════════════════════
+let currentLobby = null;       // { id, code, game_type, host_id, status, duration_mins }
+let lobbyChannel = null;       // Supabase realtime channel
+let activeGameType = null;     // 'zone' | 'line'
+let gameGpsInterval = null;    // GPS polling interval
+let gameGpsTrail = [];         // Array of GPS points [{lat,lng,ts}]
+let gameTrailLayer = null;     // Leaflet layer for trail
+let gameTimerInterval = null;  // Countdown timer
+let selectedDurationMins = 5;
+let isHost = false;
+let isReady = false;
+
+// ── SUPABASE GAME TABLES ──────────────────────────────────────
+// game_lobbies: id, code, game_type, host_id, status, duration_mins, started_at, created_at
+// game_players: id, lobby_id, user_id, username, avatar_color, ready, score, trail (jsonb), finished
+// game_scores:  id, user_id, username, game_type, score, created_at
+
+async function ensureGameTables() {
+  // Tables are created via SQL — show instructions if needed
+}
+
+// ── LOBBY CREATION ────────────────────────────────────────────
+async function openGameLobby(gameType) {
+  if(!currentUser) return toast('Accedi prima!','err');
+  switchTab('games');
+
+  const code = Math.random().toString(36).substring(2,7).toUpperCase();
+  const { data, error } = await sb.from('game_lobbies').insert({
+    code, game_type: gameType, host_id: currentUser.id,
+    status: 'waiting', duration_mins: selectedDurationMins,
+    created_at: new Date().toISOString()
+  }).select().single();
+
+  if(error) { toast('Errore creazione lobby: '+error.message,'err'); return; }
+
+  currentLobby = data;
+  isHost = true;
+  isReady = false;
+
+  // Join as player
+  await sb.from('game_players').insert({
+    lobby_id: data.id, user_id: currentUser.id,
+    username: userProfile.username, avatar_color: userProfile.avatar_color || getColor(userProfile.username),
+    ready: false, score: 0, finished: false
+  });
+
+  showLobbyView(data, gameType);
+  subscribeLobby(data.id);
+}
+
+// ── JOIN BY CODE ───────────────────────────────────────────────
+function openJoinLobby(gameType) {
+  if(!currentUser) return toast('Accedi prima!','err');
+
+  // Show join modal
+  const html = `
+    <div style="position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.7);
+      display:flex;align-items:center;justify-content:center;" id="join-modal">
+      <div style="background:var(--panel);border:1px solid var(--border);border-radius:6px;
+        padding:24px;width:280px;box-shadow:0 20px 60px rgba(0,0,0,0.8);">
+        <div style="font-family:var(--font-ui);font-weight:700;font-size:16px;color:var(--white);margin-bottom:4px;">🔗 UNISCITI A UNA LOBBY</div>
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:14px;">Inserisci il codice di 5 lettere</div>
+        <input id="join-code-input" class="join-input" maxlength="5" placeholder="XXXXX"
+          oninput="this.value=this.value.toUpperCase()" autocomplete="off"/>
+        <div id="join-error" style="font-family:var(--font-hud);font-size:9px;color:var(--red);margin-top:6px;display:none;"></div>
+        <div style="display:flex;gap:8px;margin-top:14px;">
+          <button onclick="document.getElementById('join-modal').remove()"
+            style="flex:1;padding:10px;background:rgba(255,34,68,0.1);border:1px solid #ff224433;
+            border-radius:3px;color:var(--red);font-family:var(--font-ui);font-weight:700;
+            font-size:12px;letter-spacing:1.5px;cursor:pointer;">ANNULLA</button>
+          <button onclick="doJoinLobby()"
+            style="flex:1;padding:10px;background:linear-gradient(135deg,var(--orange),#ff6a00);
+            border:none;border-radius:3px;color:#000;font-family:var(--font-ui);font-weight:700;
+            font-size:12px;letter-spacing:1.5px;cursor:pointer;">ENTRA</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  setTimeout(() => document.getElementById('join-code-input')?.focus(), 100);
+}
+
+async function doJoinLobby() {
+  const code = document.getElementById('join-code-input')?.value?.trim().toUpperCase();
+  if(!code || code.length < 4) {
+    document.getElementById('join-error').style.display='block';
+    document.getElementById('join-error').textContent='Inserisci un codice valido'; return;
+  }
+
+  const { data: lobby, error } = await sb.from('game_lobbies')
+    .select('*').eq('code', code).eq('status','waiting').maybeSingle();
+
+  if(error || !lobby) {
+    document.getElementById('join-error').style.display='block';
+    document.getElementById('join-error').textContent='Lobby non trovata o già iniziata'; return;
+  }
+
+  // Check not already in lobby
+  const { data: existing } = await sb.from('game_players')
+    .select('id').eq('lobby_id', lobby.id).eq('user_id', currentUser.id).maybeSingle();
+
+  if(!existing) {
+    await sb.from('game_players').insert({
+      lobby_id: lobby.id, user_id: currentUser.id,
+      username: userProfile.username, avatar_color: userProfile.avatar_color || getColor(userProfile.username),
+      ready: false, score: 0, finished: false
+    });
+  }
+
+  currentLobby = lobby;
+  isHost = lobby.host_id === currentUser.id;
+  isReady = false;
+  document.getElementById('join-modal')?.remove();
+  showLobbyView(lobby, lobby.game_type);
+  subscribeLobby(lobby.id);
+}
+
+// ── LOBBY UI ──────────────────────────────────────────────────
+function showLobbyView(lobby, gameType) {
+  document.getElementById('games-main-view').style.display = 'none';
+  document.getElementById('games-lobby-view').style.display = 'flex';
+  document.getElementById('games-active-view').style.display = 'none';
+
+  const titles = { zone:'🏴 GIRO DEL QUARTIERE', line:'📏 LINEA RETTA' };
+  document.getElementById('lobby-game-title').textContent = titles[gameType]||gameType.toUpperCase();
+  document.getElementById('lobby-code-badge').textContent = lobby.code;
+  document.getElementById('lobby-code-display').textContent = 'Condividi questo codice con gli amici!';
+
+  document.getElementById('btn-start-game').style.display = isHost ? 'block' : 'none';
+  document.getElementById('btn-ready').style.display = isHost ? 'none' : 'block';
+
+  loadLobbyPlayers(lobby.id);
+}
+
+async function loadLobbyPlayers(lobbyId) {
+  const { data } = await sb.from('game_players').select('*').eq('lobby_id', lobbyId);
+  renderLobbyPlayers(data || []);
+}
+
+function renderLobbyPlayers(players) {
+  const el = document.getElementById('lobby-players-list');
+  el.innerHTML = players.map(p => {
+    const isMe = p.user_id === currentUser?.id;
+    const col = p.avatar_color || getColor(p.username);
+    return `<div class="lobby-player ${p.ready?'ready':''}">
+      <div class="lp-avatar" style="background:${col}">${initials(p.username)}</div>
+      <div class="lp-name">${p.username}${isMe?' (tu)':''}</div>
+      <div class="lp-ready ${p.ready?'yes':'no'}">${p.ready?'✓ PRONTO':'⏳ ATTESA'}</div>
+    </div>`;
+  }).join('') || '<div class="empty-state">Nessun giocatore ancora</div>';
+
+  const readyCount = players.filter(p=>p.ready).length;
+  const total = players.length;
+  document.getElementById('lobby-status-msg').textContent =
+    isHost ? `${total} giocatori in lobby — premi INIZIA quando vuoi!`
+           : `${readyCount}/${total} pronti`;
+}
+
+function copyLobbyCode() {
+  const code = currentLobby?.code;
+  if(!code) return;
+  navigator.clipboard?.writeText(code).catch(()=>{});
+  toast('Codice '+code+' copiato!', 'ok');
+}
+
+async function toggleReady() {
+  if(!currentLobby || !currentUser) return;
+  isReady = !isReady;
+  await sb.from('game_players').update({ ready: isReady })
+    .eq('lobby_id', currentLobby.id).eq('user_id', currentUser.id);
+  document.getElementById('btn-ready').textContent = isReady ? '✓ NON PRONTO' : '✓ PRONTO';
+  document.getElementById('btn-ready').style.color = isReady ? 'var(--green)' : 'var(--cyan)';
+}
+
+function selectTime(btn, mins) {
+  selectedDurationMins = mins;
+  document.querySelectorAll('.time-opt').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if(isHost && currentLobby) {
+    sb.from('game_lobbies').update({ duration_mins: mins }).eq('id', currentLobby.id);
+  }
+}
+
+async function startLobbyGame() {
+  if(!currentLobby || !isHost) return;
+  const { error } = await sb.from('game_lobbies').update({
+    status: 'active', duration_mins: selectedDurationMins,
+    started_at: new Date().toISOString()
+  }).eq('id', currentLobby.id);
+  if(error) toast('Errore avvio: '+error.message,'err');
+}
+
+// ── REALTIME LOBBY SUBSCRIPTION ───────────────────────────────
+function subscribeLobby(lobbyId) {
+  if(lobbyChannel) sb.removeChannel(lobbyChannel);
+
+  lobbyChannel = sb.channel('lobby:'+lobbyId)
+    .on('postgres_changes', { event:'*', schema:'public', table:'game_players',
+      filter:`lobby_id=eq.${lobbyId}` }, payload => {
+      loadLobbyPlayers(lobbyId);
+      updateLiveLeaderboard();
+      renderPlayerMarkersOnMap(lobbyId);
+    })
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'game_lobbies',
+      filter:`id=eq.${lobbyId}` }, payload => {
+      const lobby = payload.new;
+      if(lobby.status === 'active' && activeGameType === null) {
+        currentLobby = lobby;
+        beginActiveGame(lobby);
+      }
+      if(lobby.status === 'finished') {
+        endGame();
+      }
+    })
+    .subscribe();
+}
+
+// ── ACTIVE GAME ────────────────────────────────────────────────
+async function beginActiveGame(lobby) {
+  activeGameType = lobby.game_type;
+  gameGpsTrail = [];
+  clearGameLayers();
+
+  document.getElementById('games-main-view').style.display = 'none';
+  document.getElementById('games-lobby-view').style.display = 'none';
+  document.getElementById('games-active-view').style.display = 'flex';
+
+  const titles = { zone:'🏴 GIRO DEL QUARTIERE', line:'📏 LINEA RETTA' };
+  document.getElementById('active-game-title').textContent = titles[lobby.game_type];
+
+  const durationSecs = (lobby.duration_mins || 5) * 60;
+  let secsLeft = durationSecs;
+
+  const started = lobby.started_at ? new Date(lobby.started_at) : new Date();
+  const elapsed = Math.floor((Date.now() - started.getTime()) / 1000);
+  secsLeft = Math.max(0, durationSecs - elapsed);
+
+  updateTimerDisplay(secsLeft);
+  gameTimerInterval = setInterval(() => {
+    secsLeft--;
+    updateTimerDisplay(secsLeft);
+    if(secsLeft <= 0) { clearInterval(gameTimerInterval); finishMyGame(); }
+  }, 1000);
+
+  // GPS tracking
+  gameGpsInterval = setInterval(() => {
+    navigator.geolocation.getCurrentPosition(pos => {
+      const pt = { lat: pos.coords.latitude, lng: pos.coords.longitude, ts: Date.now() };
+      gameGpsTrail.push(pt);
+      drawMyTrail();
+      const score = calcMyScore();
+      updateMyStatDisplay(score);
+      // Push update to Supabase every 5 points
+      if(gameGpsTrail.length % 5 === 0) pushGameUpdate(score);
+    }, null, { enableHighAccuracy:true, maximumAge:3000 });
+  }, 3000);
+
+  setGameOverlay('GPS ATTIVO — MUOVITI!');
+  toast('La partita è iniziata! Esci e muoviti!', 'ok');
+  updateLiveLeaderboard();
+}
+
+function updateTimerDisplay(secs) {
+  const m = Math.floor(secs/60), s = secs%60;
+  document.getElementById('game-timer-display').textContent =
+    String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  // Flash red in last 30s
+  const el = document.getElementById('game-timer-display');
+  el.style.color = secs < 30 ? 'var(--red)' : 'var(--orange)';
+}
+
+function drawMyTrail() {
+  if(gameTrailLayer) map.removeLayer(gameTrailLayer);
+  if(gameGpsTrail.length < 2) return;
+  const pts = gameGpsTrail.map(p=>[p.lat,p.lng]);
+
+  if(activeGameType === 'zone') {
+    gameTrailLayer = L.layerGroup([
+      L.polyline(pts, { color:'#ff9500', weight:4, opacity:0.8 }),
+      ...(pts.length >= 3 ? [L.polygon(pts, { color:'#ff9500', weight:1, fillColor:'#ff9500', fillOpacity:0.1 })] : [])
+    ]).addTo(map);
+  } else {
+    // For line: show straight line from first to last point + actual trail
+    const first = pts[0], last = pts[pts.length-1];
+    gameTrailLayer = L.layerGroup([
+      L.polyline(pts, { color:'#3a4560', weight:2, opacity:0.5, dashArray:'4 4' }),
+      L.polyline([first, last], { color:'#00f5d4', weight:4, opacity:0.9 }),
+      L.circleMarker(first, { radius:6, color:'#39ff14', fillColor:'#39ff14', fillOpacity:1 }),
+      L.circleMarker(last, { radius:6, color:'#ff9500', fillColor:'#ff9500', fillOpacity:1 }),
+    ]).addTo(map);
+  }
+}
+
+function calcMyScore() {
+  if(!gameGpsTrail.length) return 0;
+  if(activeGameType === 'line') {
+    if(gameGpsTrail.length < 2) return 0;
+    const first = gameGpsTrail[0];
+    const last = gameGpsTrail[gameGpsTrail.length-1];
+    return map.distance([first.lat,first.lng],[last.lat,last.lng]) / 1000; // km
+  } else {
+    // Zone: calculate enclosed area
+    if(gameGpsTrail.length < 3) return 0;
+    return calcPolygonArea(gameGpsTrail.map(p=>[p.lat,p.lng])) / 1_000_000; // km²
+  }
+}
+
+function updateMyStatDisplay(score) {
+  const el = document.getElementById('my-game-stat');
+  if(activeGameType === 'line') {
+    el.textContent = `📏 Distanza retta: ${score.toFixed(3)} km`;
+  } else {
+    el.textContent = `🏴 Area: ${(score*100).toFixed(2)} ettari`;
+  }
+}
+
+async function pushGameUpdate(score) {
+  if(!currentLobby || !currentUser) return;
+  await sb.from('game_players').update({
+    score: parseFloat(score.toFixed(6)),
+    trail: gameGpsTrail.slice(-50) // last 50 points
+  }).eq('lobby_id', currentLobby.id).eq('user_id', currentUser.id);
+}
+
+async function finishMyGame() {
+  const score = calcMyScore();
+  await pushGameUpdate(score);
+  await sb.from('game_players').update({ finished: true, score: parseFloat(score.toFixed(6)) })
+    .eq('lobby_id', currentLobby.id).eq('user_id', currentUser.id);
+
+  clearInterval(gameGpsInterval); gameGpsInterval = null;
+  setGameOverlay(null);
+
+  // Save to global scores
+  await sb.from('game_scores').insert({
+    user_id: currentUser.id, username: userProfile.username,
+    game_type: activeGameType, score: parseFloat(score.toFixed(6)),
+    created_at: new Date().toISOString()
+  }).catch(()=>{});
+
+  toast('Partita finita! Risultato: '+(activeGameType==='line'?score.toFixed(3)+' km':(score*100).toFixed(2)+' ha'), 'ok');
+
+  // Check if all finished
+  const { data: players } = await sb.from('game_players').select('*').eq('lobby_id', currentLobby.id);
+  const allDone = players?.every(p => p.finished);
+  if(allDone && isHost) {
+    await sb.from('game_lobbies').update({ status:'finished' }).eq('id', currentLobby.id);
+  }
+
+  setTimeout(() => showResultsScreen(players), 500);
+}
+
+function showResultsScreen(players) {
+  clearInterval(gameTimerInterval);
+  clearInterval(gameGpsInterval);
+
+  const isLine = activeGameType === 'line';
+  const sorted = [...(players||[])].sort((a,b) => b.score - a.score);
+  const medals = ['🥇','🥈','🥉'];
+  const myResult = sorted.find(p => p.user_id === currentUser?.id);
+  const myRank = sorted.findIndex(p => p.user_id === currentUser?.id) + 1;
+  const gameLabel = isLine ? '📏 LINEA RETTA' : '🏴 GIRO DEL QUARTIERE';
+
+  // Build results HTML
+  const resultRows = sorted.map((p,i) => {
+    const isMe = p.user_id === currentUser?.id;
+    const col = p.avatar_color || getColor(p.username);
+    const valStr = isLine ? p.score.toFixed(3)+' km' : (p.score*100).toFixed(2)+' ha';
+    // Calc duration from trail
+    const trailDur = p.trail?.length >= 2
+      ? Math.round((p.trail[p.trail.length-1].ts - p.trail[0].ts)/60000)
+      : null;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;
+      background:${isMe?'rgba(255,149,0,0.08)':'var(--panel2)'};
+      border:1px solid ${isMe?'#ff950055':'var(--border)'};
+      border-radius:5px;margin-bottom:6px;">
+      <div style="font-size:22px;width:28px;text-align:center;">${medals[i]||'#'+(i+1)}</div>
+      <div style="width:34px;height:34px;border-radius:50%;background:${col};
+        display:flex;align-items:center;justify-content:center;
+        font-family:var(--font-ui);font-weight:700;font-size:14px;color:var(--bg);flex-shrink:0;">${initials(p.username)}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:var(--font-ui);font-weight:700;font-size:14px;color:var(--white);">
+          ${p.username}${isMe?' <span style="color:var(--orange)">★ TU</span>':''}
+        </div>
+        ${trailDur !== null ? `<div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);">${trailDur} min in giro</div>`:''}
+      </div>
+      <div style="font-family:var(--font-ui);font-weight:700;font-size:16px;
+        color:${i===0?'#ffd700':i===1?'#c0c0c0':i===2?'#cd7f32':'var(--cyan)'};">${p.score>0?valStr:'—'}</div>
+    </div>`;
+  }).join('');
+
+  const myScoreStr = myResult?.score > 0
+    ? (isLine ? myResult.score.toFixed(3)+' km' : (myResult.score*100).toFixed(2)+' ha')
+    : '—';
+
+  // Show modal overlay
+  const html = `
+  <div id="results-modal" style="position:fixed;inset:0;z-index:9500;
+    background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;
+    padding:16px;">
+    <div style="background:var(--panel);border:1px solid var(--orange);border-radius:8px;
+      width:100%;max-width:400px;max-height:90vh;overflow-y:auto;
+      box-shadow:0 0 60px #ff950033;">
+
+      <!-- Header -->
+      <div style="height:3px;background:linear-gradient(90deg,var(--orange),var(--yellow));"></div>
+      <div style="padding:20px 20px 0;text-align:center;">
+        <div style="font-size:40px;margin-bottom:4px;">${myRank===1?'🏆':myRank===2?'🥈':myRank===3?'🥉':'🎮'}</div>
+        <div style="font-family:var(--font-ui);font-weight:700;font-size:22px;color:var(--orange);letter-spacing:3px;">
+          ${myRank===1?'HAI VINTO!':myRank===2?'2° POSTO!':myRank===3?'3° POSTO!':'PARTITA FINITA'}
+        </div>
+        <div style="font-family:var(--font-hud);font-size:10px;color:var(--dim);letter-spacing:2px;margin-top:4px;">${gameLabel}</div>
+      </div>
+
+      <!-- My stats box -->
+      <div style="margin:16px 20px;background:rgba(255,149,0,0.07);border:1px solid #ff950033;
+        border-radius:5px;padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:center;">
+        <div>
+          <div style="font-family:var(--font-hud);font-size:8px;color:var(--dim);letter-spacing:1.5px;margin-bottom:4px;">IL TUO RISULTATO</div>
+          <div style="font-family:var(--font-ui);font-weight:700;font-size:22px;color:var(--orange);">${myScoreStr}</div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-hud);font-size:8px;color:var(--dim);letter-spacing:1.5px;margin-bottom:4px;">POSIZIONE</div>
+          <div style="font-family:var(--font-ui);font-weight:700;font-size:22px;color:var(--white);">${myRank}° / ${sorted.length}</div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-hud);font-size:8px;color:var(--dim);letter-spacing:1.5px;margin-bottom:4px;">GIOCATORI</div>
+          <div style="font-family:var(--font-ui);font-weight:700;font-size:18px;color:var(--white);">${sorted.length}</div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-hud);font-size:8px;color:var(--dim);letter-spacing:1.5px;margin-bottom:4px;">DURATA</div>
+          <div style="font-family:var(--font-ui);font-weight:700;font-size:18px;color:var(--white);">${currentLobby?.duration_mins||'—'} min</div>
+        </div>
+      </div>
+
+      <!-- Classifica partita -->
+      <div style="padding:0 20px;">
+        <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);
+          letter-spacing:2px;margin-bottom:10px;border-top:1px solid var(--border);padding-top:12px;">
+          CLASSIFICA FINALE
+        </div>
+        ${resultRows}
+      </div>
+
+      <!-- Close button -->
+      <div style="padding:16px 20px 20px;">
+        <button onclick="closeResults()" style="width:100%;padding:14px;
+          background:linear-gradient(135deg,var(--orange),#ff6a00);
+          border:none;border-radius:4px;color:#000;
+          font-family:var(--font-ui);font-weight:700;font-size:14px;
+          letter-spacing:2px;cursor:pointer;text-transform:uppercase;">
+          ✓ CHIUDI
+        </button>
+      </div>
+    </div>
+  </div>`;
+
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  // Cleanup state
+  const savedGameType = activeGameType;
+  activeGameType = null;
+  currentLobby = null;
+  if(lobbyChannel) { sb.removeChannel(lobbyChannel); lobbyChannel=null; }
+  setGameOverlay(null);
+  clearGameLayers();
+}
+
+function closeResults() {
+  document.getElementById('results-modal')?.remove();
+  document.getElementById('games-active-view').style.display = 'none';
+  document.getElementById('games-main-view').style.display = 'block';
+}
+
+async function updateLiveLeaderboard() {
+  if(!currentLobby) return;
+  const { data } = await sb.from('game_players').select('*')
+    .eq('lobby_id', currentLobby.id).order('score', { ascending:false });
+  if(!data) return;
+
+  const isLine = activeGameType === 'line' || currentLobby.game_type === 'line';
+  const medals = ['🥇','🥈','🥉'];
+  const el = document.getElementById('live-leaderboard');
+  if(!el) return;
+
+  el.innerHTML = data.map((p,i) => {
+    const isMe = p.user_id === currentUser?.id;
+    const col = p.avatar_color || getColor(p.username);
+    const valStr = isLine ? p.score.toFixed(3)+' km' : (p.score*100).toFixed(2)+' ha';
+    return `<div class="live-row ${isMe?'me':''}">
+      <div class="live-rank">${medals[i]||'#'+(i+1)}</div>
+      <div class="lp-avatar" style="background:${col};width:24px;height:24px;border-radius:50%;
+        display:flex;align-items:center;justify-content:center;font-family:var(--font-ui);
+        font-weight:700;font-size:10px;color:var(--bg);flex-shrink:0;">${initials(p.username)}</div>
+      <div class="live-name">${p.username}${isMe?' ★':''}</div>
+      <div class="live-val">${p.score > 0 ? valStr : '—'}</div>
+    </div>`;
+  }).join('');
+}
+
+async function renderPlayerMarkersOnMap(lobbyId) {
+  const { data } = await sb.from('game_players').select('*').eq('lobby_id', lobbyId);
+  (data||[]).forEach(p => {
+    if(p.user_id === currentUser?.id || !p.trail?.length) return;
+    const last = p.trail[p.trail.length-1];
+    const col = p.avatar_color || getColor(p.username);
+    const icon = L.divIcon({
+      className:'',
+      html:`<div class="friend-marker-wrap">
+        <div class="friend-avatar-m" style="background:${col}">${initials(p.username)}</div>
+        <div class="friend-label-m">${p.username}</div>
+      </div>`,
+      iconSize:[50,50], iconAnchor:[16,44]
+    });
+    L.marker([last.lat, last.lng], { icon, zIndexOffset:700 }).addTo(map);
+  });
+}
+
+async function abandonGame() {
+  clearInterval(gameTimerInterval);
+  clearInterval(gameGpsInterval);
+  activeGameType = null;
+  if(lobbyChannel) { sb.removeChannel(lobbyChannel); lobbyChannel=null; }
+  currentLobby = null;
+  clearGameLayers();
+  setGameOverlay(null);
+  document.getElementById('games-active-view').style.display = 'none';
+  document.getElementById('games-main-view').style.display = 'block';
+  toast('Hai abbandonato la partita', 'info');
+}
+
+function closeLobby() {
+  if(lobbyChannel) { sb.removeChannel(lobbyChannel); lobbyChannel=null; }
+  currentLobby = null; isHost = false; isReady = false;
+  document.getElementById('games-lobby-view').style.display = 'none';
+  document.getElementById('games-main-view').style.display = 'block';
+}
+
+// ── CLASSIFICA AMICI (MAX 15) ─────────────────────────────────
+async function showLeaderboard(gameType) {
+  const el = document.getElementById('games-leaderboard-panel');
+  el.innerHTML = '<div class="empty-state">Caricamento...</div>';
+
+  // Solo tra amici + me stesso, max 15
+  const friendIds = friendsData.map(f => f.id);
+  friendIds.push(currentUser.id);
+  const limitedIds = friendIds.slice(0, 15);
+
+  const { data } = await sb.from('game_scores')
+    .select('*')
+    .eq('game_type', gameType)
+    .in('user_id', limitedIds)
+    .order('score', { ascending: false })
+    .limit(15);
+
+  const isLine = gameType === 'line';
+  const medals = ['🥇','🥈','🥉'];
+  const gameLabel = isLine ? 'LINEA RETTA' : 'GIRO DEL QUARTIERE';
+
+  if(!data?.length) {
+    el.innerHTML = `<div class="empty-state">Nessun record ancora!<br/>Gioca una partita con gli amici.</div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);
+      letter-spacing:1.5px;margin-bottom:10px;">👥 ${gameLabel} — RECORD AMICI</div>
+    ${data.map((s,i) => {
+      const isMe = s.user_id === currentUser?.id;
+      const valStr = isLine ? s.score.toFixed(3)+' km' : (s.score*100).toFixed(2)+' ha';
+      const date = new Date(s.created_at).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'});
+      return `<div class="lb-row" style="${isMe?'background:rgba(255,149,0,0.06);border-radius:3px;padding:4px 6px;':''}">
+        <span class="lb-rank ${i===0?'gold':i===1?'silver':i===2?'bronze':''}">${medals[i]||i+1}</span>
+        <span class="lb-name">${s.username}${isMe?' ★':''}</span>
+        <span style="font-family:var(--font-hud);font-size:8px;color:var(--dim);margin-right:6px;">${date}</span>
+        <span class="lb-val">${valStr}</span>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+// ── HELPERS ───────────────────────────────────────────────────
+function clearGameLayers() {
+  if(gameTrailLayer) { map.removeLayer(gameTrailLayer); gameTrailLayer=null; }
+}
+
+function setGameOverlay(text) {
+  const el = document.getElementById('game-overlay');
+  if(el) { if(text){el.textContent=text;el.classList.add('visible');}else{el.classList.remove('visible');} }
+}
+
+function calcPolygonArea(pts) {
+  let area = 0; const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  for(let i=0;i<pts.length;i++){
+    const j=(i+1)%pts.length;
+    const xi=toRad(pts[i][1])*Math.cos(toRad(pts[i][0]));
+    const yi=toRad(pts[i][0]);
+    const xj=toRad(pts[j][1])*Math.cos(toRad(pts[j][0]));
+    const yj=toRad(pts[j][0]);
+    area+=xi*yj-xj*yi;
+  }
+  return Math.abs(area/2)*R*R;
+}
+
+function updateLeaderboard() {} // legacy stub
+function saveGameScore() {}     // legacy stub
+
+
+function clearGameLayer() {
+  if(gameLayer) { map.removeLayer(gameLayer); gameLayer = null; }
+}
+
+function setGameOverlay(text) {
+  const el = document.getElementById('game-overlay');
+  if(text) { el.textContent = text; el.classList.add('visible'); }
+  else { el.classList.remove('visible'); }
+}
+
+// ── GIOCO 1: CONQUISTA ZONA ──────────────────────────────────
+function startZoneGame() {
+  if(activeGame) return toast('Ferma il gioco attivo prima!', 'err');
+  activeGame = 'zone';
+  gamePoints = [];
+  clearGameLayer();
+  document.getElementById('btn-zone-start').style.display = 'none';
+  document.getElementById('btn-zone-stop').style.display = 'inline-block';
+  document.getElementById('zone-status').style.display = 'block';
+  document.getElementById('zone-score').style.display = 'none';
+  setGameOverlay('🏴 CONQUISTA ZONA — Clicca sulla mappa per tracciare la tua zona!');
+  toast('Clicca sulla mappa per disegnare la tua zona!', 'info');
+
+  gameTimeLeft = 60;
+  gameTimer = setInterval(() => {
+    gameTimeLeft--;
+    setGameOverlay(`🏴 CONQUISTA ZONA — ${gameTimeLeft}s rimasti | Punti: ${gamePoints.length}`);
+    if(gameTimeLeft <= 0) stopZoneGame();
+  }, 1000);
+
+  map.on('click', onZoneClick);
+}
+
+function onZoneClick(e) {
+  if(activeGame !== 'zone') return;
+  gamePoints.push([e.latlng.lat, e.latlng.lng]);
+  clearGameLayer();
+  if(gamePoints.length >= 3) {
+    const closed = [...gamePoints, gamePoints[0]];
+    gameLayer = L.polygon(gamePoints, {
+      color: '#ff9500', weight: 2, fillColor: '#ff9500', fillOpacity: 0.15,
+      dashArray: '8 4'
+    }).addTo(map);
+  } else {
+    gameLayer = L.polyline(gamePoints, { color:'#ff9500', weight:2 }).addTo(map);
+  }
+}
+
+function stopZoneGame() {
+  clearInterval(gameTimer);
+  map.off('click', onZoneClick);
+  activeGame = null;
+  document.getElementById('btn-zone-start').style.display = 'inline-block';
+  document.getElementById('btn-zone-stop').style.display = 'none';
+  document.getElementById('zone-status').style.display = 'none';
+
+  if(gamePoints.length >= 3) {
+    const areaSqM = calcPolygonArea(gamePoints);
+    const areaSqKm = (areaSqM / 1_000_000).toFixed(4);
+    const areaHa = (areaSqM / 10000).toFixed(1);
+    const scoreEl = document.getElementById('zone-score');
+    scoreEl.style.display = 'block';
+    scoreEl.innerHTML = `🏴 ZONA CONQUISTATA<br/>📐 Superficie: <b style="color:var(--orange)">${areaHa} ettari</b> (${areaSqKm} km²)<br/>📍 Vertici: ${gamePoints.length}`;
+    saveGameScore('zone', parseFloat(areaSqKm));
+    toast(`Zona: ${areaHa} ettari conquistati!`, 'ok');
+  } else {
+    toast('Troppo pochi punti per formare una zona!', 'err');
+  }
+  setGameOverlay(null);
+}
+
+function calcPolygonArea(pts) {
+  // Shoelace formula in coordinate sferiche (approssimato)
+  let area = 0;
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  for(let i = 0; i < pts.length; i++) {
+    const j = (i+1) % pts.length;
+    const xi = toRad(pts[i][1]) * Math.cos(toRad(pts[i][0]));
+    const yi = toRad(pts[i][0]);
+    const xj = toRad(pts[j][1]) * Math.cos(toRad(pts[j][0]));
+    const yj = toRad(pts[j][0]);
+    area += xi * yj - xj * yi;
+  }
+  return Math.abs(area/2) * R * R;
+}
+
+// ── GIOCO 2: LINEA PIÙ LUNGA ─────────────────────────────────
+function startLineGame() {
+  if(activeGame) return toast('Ferma il gioco attivo prima!', 'err');
+  activeGame = 'line';
+  gamePoints = [];
+  clearGameLayer();
+  document.getElementById('btn-line-start').style.display = 'none';
+  document.getElementById('btn-line-stop').style.display = 'inline-block';
+  document.getElementById('line-status').style.display = 'block';
+  document.getElementById('line-score').style.display = 'none';
+  setGameOverlay('📏 LINEA PIÙ LUNGA — Clicca il punto di partenza!');
+  toast('Clicca il punto di partenza sulla mappa!', 'info');
+  map.on('click', onLineClick);
+}
+
+function onLineClick(e) {
+  if(activeGame !== 'line') return;
+  gamePoints.push([e.latlng.lat, e.latlng.lng]);
+  clearGameLayer();
+
+  if(gamePoints.length === 1) {
+    gameLayer = L.circleMarker(gamePoints[0], {
+      radius:8, color:'#00f5d4', fillColor:'#00f5d4', fillOpacity:1
+    }).addTo(map);
+    setGameOverlay('📏 LINEA PIÙ LUNGA — Ora clicca il punto di arrivo!');
+    document.getElementById('line-status').textContent = '● CLICCA IL PUNTO DI ARRIVO...';
+  } else if(gamePoints.length === 2) {
+    const distM = map.distance(gamePoints[0], gamePoints[1]);
+    const distKm = (distM/1000).toFixed(2);
+    gameLayer = L.layerGroup([
+      L.polyline(gamePoints, { color:'#00f5d4', weight:4, opacity:0.8, dashArray:'12 6' }),
+      L.circleMarker(gamePoints[0], { radius:8, color:'#00f5d4', fillColor:'#00f5d4', fillOpacity:1 }),
+      L.circleMarker(gamePoints[1], { radius:8, color:'#ff9500', fillColor:'#ff9500', fillOpacity:1 }),
+    ]).addTo(map);
+    map.off('click', onLineClick);
+    activeGame = null;
+    document.getElementById('btn-line-start').style.display = 'inline-block';
+    document.getElementById('btn-line-stop').style.display = 'none';
+    document.getElementById('line-status').style.display = 'none';
+    const scoreEl = document.getElementById('line-score');
+    scoreEl.style.display = 'block';
+    scoreEl.innerHTML = `📏 LINEA TRACCIATA<br/>📐 Lunghezza: <b style="color:var(--cyan)">${distKm} km</b> (${Math.round(distM)} m)`;
+    saveGameScore('line', parseFloat(distKm));
+    setGameOverlay(null);
+    toast(`Linea: ${distKm} km!`, 'ok');
+  }
+}
+
+function stopLineGame() {
+  clearInterval(gameTimer);
+  map.off('click', onLineClick);
+  activeGame = null;
+  clearGameLayer();
+  document.getElementById('btn-line-start').style.display = 'inline-block';
+  document.getElementById('btn-line-stop').style.display = 'none';
+  document.getElementById('line-status').style.display = 'none';
+  setGameOverlay(null);
+}
+
+// ── GIOCO 3: CORSA AL PUNTO ──────────────────────────────────
+let raceTarget = null, raceInterval = null;
+
+function startRaceGame() {
+  if(activeGame) return toast('Ferma il gioco attivo prima!', 'err');
+  if(!navigator.geolocation) return toast('GPS non disponibile!', 'err');
+  activeGame = 'race';
+  clearGameLayer();
+
+  // Genera punto casuale entro ~3km dalla posizione attuale
+  navigator.geolocation.getCurrentPosition(pos => {
+    const lat = pos.coords.latitude + (Math.random()-0.5)*0.04;
+    const lng = pos.coords.longitude + (Math.random()-0.5)*0.05;
+    raceTarget = [lat, lng];
+
+    const icon = L.divIcon({
+      className:'',
+      html:`<div style="width:30px;height:30px;background:var(--red);clip-path:polygon(50% 0%,100% 38%,82% 100%,18% 100%,0% 38%);display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 0 16px #ff224499;animation:dest-bob 1.5s ease-in-out infinite;">🏁</div>`,
+      iconSize:[30,30], iconAnchor:[15,15]
+    });
+    gameLayer = L.marker(raceTarget, { icon }).addTo(map);
+    map.flyTo(raceTarget, 14, { duration:2 });
+
+    document.getElementById('btn-race-start').style.display = 'none';
+    document.getElementById('btn-race-stop').style.display = 'inline-block';
+    document.getElementById('race-status').style.display = 'block';
+
+    gameTimeLeft = 300; // 5 minuti
+    gameTimer = setInterval(() => {
+      gameTimeLeft--;
+      navigator.geolocation.getCurrentPosition(p => {
+        const myPos = [p.coords.latitude, p.coords.longitude];
+        const distM = map.distance(myPos, raceTarget);
+        const mins = Math.floor(gameTimeLeft/60), secs = gameTimeLeft%60;
+        setGameOverlay(`🏁 CORSA — Distanza: ${Math.round(distM)}m | ⏱ ${mins}:${String(secs).padStart(2,'0')}`);
+        document.getElementById('race-status').textContent = `● DISTANZA DAL TARGET: ${Math.round(distM)}m`;
+        if(distM < 30) {
+          toast('🏆 HAI RAGGIUNTO IL PUNTO! Hai vinto!', 'ok');
+          saveGameScore('race', Math.round(300-gameTimeLeft));
+          stopRaceGame();
+        }
+      });
+      if(gameTimeLeft <= 0) {
+        toast('Tempo scaduto!', 'err');
+        stopRaceGame();
+      }
+    }, 1000);
+    setGameOverlay('🏁 CORSA AL PUNTO — Raggiungi la bandiera rossa!');
+    toast('Raggiungi la bandiera rossa nella realtà!', 'info');
+  }, () => toast('GPS non disponibile!', 'err'), { enableHighAccuracy:true });
+}
+
+function stopRaceGame() {
+  clearInterval(gameTimer); clearInterval(raceInterval);
+  activeGame = null; raceTarget = null;
+  clearGameLayer();
+  document.getElementById('btn-race-start').style.display = 'inline-block';
+  document.getElementById('btn-race-stop').style.display = 'none';
+  document.getElementById('race-status').style.display = 'none';
+  setGameOverlay(null);
+}
+
+// ── LEADERBOARD ──────────────────────────────────────────────
+function saveGameScore(game, value) {
+  const key = `gtamap_score_${game}`;
+  const current = parseFloat(localStorage.getItem(key)||0);
+  const newBest = game === 'race' ? Math.min(current||9999, value) : Math.max(current, value);
+  localStorage.setItem(key, newBest);
+  updateLeaderboard();
+}
+
+function updateLeaderboard() {
+  const lb = document.getElementById('games-leaderboard');
+  const zoneScore = parseFloat(localStorage.getItem('gtamap_score_zone')||0);
+  const lineScore = parseFloat(localStorage.getItem('gtamap_score_line')||0);
+  const raceScore = parseFloat(localStorage.getItem('gtamap_score_race')||0);
+  const name = userProfile?.username || 'Tu';
+
+  lb.innerHTML = `
+    <div style="font-family:var(--font-hud);font-size:9px;color:var(--dim);letter-spacing:1.5px;margin-bottom:8px;">I TUOI RECORD PERSONALI</div>
+    <div class="lb-row"><span class="lb-rank gold">🏴</span><span class="lb-name">Zona più grande</span><span class="lb-val">${zoneScore ? zoneScore.toFixed(4)+' km²' : '—'}</span></div>
+    <div class="lb-row"><span class="lb-rank silver">📏</span><span class="lb-name">Linea più lunga</span><span class="lb-val">${lineScore ? lineScore.toFixed(2)+' km' : '—'}</span></div>
+    <div class="lb-row"><span class="lb-rank bronze">🏁</span><span class="lb-name">Corsa più veloce</span><span class="lb-val">${raceScore ? formatTime(raceScore) : '—'}</span></div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  NASCONDINO
+// ══════════════════════════════════════════════════════════════
+let hideSettings = { radius: 500, ping: 30, duration: 600, capture: 10 };
+let hideLobbyId = null, hideRole = null; // 'hider' | 'seeker'
+let hideTimer = null, hidePingTimer = null, hideGpsInterval = null;
+let hideTimeLeft = 0, hidePingLeft = 0;
+let hideBaseAccum = 0, hideBaseInterval = null; // accumulo secondi alla base
+let hideAreaCenter = null, hideAreaCircle = null, hidePingMarker = null;
+let hideOpponentMarker = null, hideVisibleTimer = null;
+let hideChannel = null, hideReady = false, hideIsHost = false;
+let hideOpponentPos = null;
+const HIDE_BASE_TARGET = 180; // 3 minuti totali alla base
+
+function selectHideOpt(el, key, val) {
+  el.closest('div').querySelectorAll('.hide-opt').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  hideSettings[key] = val;
+}
+
+function showHideView(viewId) {
+  document.getElementById('games-main-view').style.display = 'none';
+  document.getElementById('games-lobby-view').style.display = 'none';
+  document.getElementById('games-active-view').style.display = 'none';
+  document.getElementById('hide-setup-view').style.display = 'none';
+  document.getElementById('hide-active-view').style.display = 'none';
+  if(viewId) document.getElementById(viewId).style.display = 'flex';
+}
+
+function closeHideSetup() {
+  if(hideLobbyId) {
+    sb.from('hide_lobbies').delete().eq('id', hideLobbyId);
+    if(hideChannel) sb.removeChannel(hideChannel);
+    hideLobbyId = null;
+  }
+  showHideView('games-main-view');
+}
+
+async function openHideLobby() {
+  if(!currentUser) return toast('Devi essere loggato!', 'err');
+  switchTab('games');
+  showHideView('hide-setup-view');
+  hideIsHost = true;
+  hideReady = false;
+
+  // Genera codice lobby
+  const code = Math.random().toString(36).substring(2,7).toUpperCase();
+
+  // Salva lobby su Supabase
+  const { data, error } = await sb.from('hide_lobbies').insert({
+    code,
+    host_id: currentUser.id,
+    host_name: userProfile.username,
+    settings: hideSettings,
+    status: 'waiting',
+    host_ready: false,
+    guest_ready: false,
+    created_at: new Date().toISOString()
+  }).select().single();
+
+  if(error) { toast('Errore creazione lobby: '+error.message, 'err'); return; }
+  hideLobbyId = data.id;
+
+  document.getElementById('hide-code-badge').textContent = code;
+  document.getElementById('hide-status-msg').textContent = 'In attesa dell\'avversario...';
+  document.getElementById('btn-hide-start').style.display = 'none';
+  document.getElementById('btn-hide-ready').style.display = 'block';
+  renderHidePlayers([{ name: userProfile.username, ready: false, isMe: true }]);
+
+  // Subscribe realtime
+  subscribeHideLobby(data.id);
+}
+
+async function joinHideLobby() {
+  const code = prompt('Inserisci il codice lobby:');
+  if(!code) return;
+
+  const { data, error } = await sb.from('hide_lobbies')
+    .select('*').eq('code', code.toUpperCase().trim()).eq('status','waiting').maybeSingle();
+
+  if(error || !data) { toast('Lobby non trovata!', 'err'); return; }
+  if(data.guest_id) { toast('Lobby già piena!', 'err'); return; }
+
+  hideLobbyId = data.id;
+  hideIsHost = false;
+  hideReady = false;
+  hideSettings = data.settings || hideSettings;
+
+  await sb.from('hide_lobbies').update({
+    guest_id: currentUser.id,
+    guest_name: userProfile.username,
+    guest_ready: false
+  }).eq('id', data.id);
+
+  switchTab('games');
+  showHideView('hide-setup-view');
+  document.getElementById('hide-code-badge').textContent = data.code;
+  document.getElementById('btn-hide-start').style.display = 'none';
+  document.getElementById('btn-hide-ready').style.display = 'block';
+
+  subscribeHideLobby(data.id);
+}
+
+function subscribeHideLobby(lobbyId) {
+  hideChannel = sb.channel('hide_lobby_'+lobbyId)
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'hide_lobbies', filter:'id=eq.'+lobbyId },
+      async payload => {
+        const d = payload.new;
+
+        // Aggiorna lista giocatori
+        const players = [];
+        if(d.host_name) players.push({ name: d.host_name, ready: d.host_ready, isMe: currentUser.id === d.host_id });
+        if(d.guest_name) players.push({ name: d.guest_name, ready: d.guest_ready, isMe: currentUser.id === d.guest_id });
+        renderHidePlayers(players);
+
+        // Host vede start se entrambi pronti
+        if(hideIsHost && d.host_ready && d.guest_ready && d.guest_id) {
+          document.getElementById('btn-hide-start').style.display = 'block';
+          document.getElementById('hide-status-msg').textContent = '✓ Tutti pronti! Puoi iniziare.';
+        } else if(d.guest_id) {
+          document.getElementById('hide-status-msg').textContent = d.host_ready && d.guest_ready ? '✓ Tutti pronti!' : 'In attesa che tutti siano pronti...';
+        }
+
+        // Partita iniziata
+        if(d.status === 'playing' && d.role_host) {
+          hideRole = (currentUser.id === d.host_id) ? d.role_host : (d.role_host === 'hider' ? 'seeker' : 'hider');
+          hideAreaCenter = [d.area_lat, d.area_lng];
+          hideSettings = d.settings || hideSettings;
+          startHideActiveGame();
+        }
+
+        // Gioco terminato
+        if(d.status === 'ended') {
+          endHideGame(d.winner_id === currentUser.id ? 'win' : 'lose', d.end_reason);
+        }
+
+        // Ping dal nascosto (solo il cercatore lo vede)
+        if(d.last_ping_lat && d.last_ping_lng && hideRole === 'seeker') {
+          if(d.last_ping_at !== (hidePingLastAt||null)) {
+            hidePingLastAt = d.last_ping_at;
+            showPingOnMap(d.last_ping_lat, d.last_ping_lng);
+          }
+        }
+
+        // Fuori area — nascosto visibile al cercatore
+        if(d.hider_visible && hideRole === 'seeker' && d.hider_lat && d.hider_lng) {
+          showHiderVisible(d.hider_lat, d.hider_lng);
+        }
+      }
+    ).subscribe();
+}
+
+let hidePingLastAt = null;
+
+function renderHidePlayers(players) {
+  document.getElementById('hide-players-list').innerHTML = players.map(p => `
+    <div class="lobby-player ${p.ready?'ready':''}">
+      <div class="lp-avatar" style="background:${getColor(p.name)}">${initials(p.name)}</div>
+      <div class="lp-name">${p.name}${p.isMe?' (tu)':''}</div>
+      <div class="lp-ready ${p.ready?'yes':'no'}">${p.ready?'✓ PRONTO':'⏳ ATTESA'}</div>
+    </div>`).join('');
+}
+
+async function toggleHideReady() {
+  hideReady = !hideReady;
+  const field = hideIsHost ? 'host_ready' : 'guest_ready';
+  await sb.from('hide_lobbies').update({ [field]: hideReady, settings: hideSettings }).eq('id', hideLobbyId);
+  document.getElementById('btn-hide-ready').style.background = hideReady ? 'rgba(57,255,20,0.15)' : 'rgba(168,85,247,0.1)';
+  document.getElementById('btn-hide-ready').style.color = hideReady ? 'var(--green)' : 'var(--purple)';
+  document.getElementById('btn-hide-ready').textContent = hideReady ? '✓ PRONTO' : '⏳ NON PRONTO';
+}
+
+async function startHideGame() {
+  if(!hideIsHost) return;
+  // Assegna ruoli casualmente
+  const roleHost = Math.random() < 0.5 ? 'hider' : 'seeker';
+
+  // Usa posizione attuale come centro area
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const lat = pos.coords.latitude, lng = pos.coords.longitude;
+    await sb.from('hide_lobbies').update({
+      status: 'playing',
+      role_host: roleHost,
+      area_lat: lat, area_lng: lng,
+      started_at: new Date().toISOString(),
+      settings: hideSettings
+    }).eq('id', hideLobbyId);
+  }, () => toast('GPS necessario per avviare!', 'err'), { enableHighAccuracy: true });
+}
+
+function startHideActiveGame() {
+  showHideView('hide-active-view');
+  switchTab('games');
+
+  hideTimeLeft = hideSettings.duration;
+  hidePingLeft = hideSettings.ping;
+  hideBaseAccum = 0;
+
+  // Disegna area sulla mappa
+  if(hideAreaCircle) map.removeLayer(hideAreaCircle);
+  hideAreaCircle = L.circle(hideAreaCenter, {
+    radius: hideSettings.radius,
+    color: hideRole === 'hider' ? '#a855f7' : '#ff2244',
+    fillColor: hideRole === 'hider' ? '#a855f7' : '#ff2244',
+    fillOpacity: 0.07, weight: 2, dashArray: '8 4'
+  }).addTo(map);
+  map.flyTo(hideAreaCenter, 15, { duration: 2 });
+
+  // Marker base (punto di partenza = centro area)
+  L.circleMarker(hideAreaCenter, {
+    radius: 10, color: '#a855f7', fillColor: '#a855f7', fillOpacity: 0.8
+  }).bindTooltip('🏠 BASE', { permanent: true, className: 'hide-base-label' }).addTo(map);
+
+  updateHideUI();
+
+  // Timer principale
+  hideTimer = setInterval(() => {
+    hideTimeLeft--;
+    updateHideTimerDisplay();
+    if(hideTimeLeft <= 0) {
+      // Tempo scaduto — il nascosto vince se non è stato trovato
+      sb.from('hide_lobbies').update({
+        status: 'ended',
+        winner_id: hideRole === 'hider' ? currentUser.id : null,
+        end_reason: 'timeout'
+      }).eq('id', hideLobbyId);
+    }
+  }, 1000);
+
+  // GPS tracking
+  hideGpsInterval = setInterval(() => {
+    navigator.geolocation.getCurrentPosition(pos => {
+      const lat = pos.coords.latitude, lng = pos.coords.longitude;
+      placePlayerMarker([lat, lng]);
+      checkHideConditions(lat, lng);
+
+      // Aggiorna posizione su DB
+      const updateData = hideRole === 'hider'
+        ? { hider_lat: lat, hider_lng: lng }
+        : { seeker_lat: lat, seeker_lng: lng };
+      sb.from('hide_lobbies').update(updateData).eq('id', hideLobbyId);
+    }, null, { enableHighAccuracy: true });
+  }, 3000);
+
+  // Ping timer (solo hider)
+  if(hideRole === 'hider') {
+    document.getElementById('hide-ping-countdown').style.display = 'block';
+    hidePingTimer = setInterval(() => {
+      hidePingLeft--;
+      document.getElementById('hide-ping-secs').textContent = hidePingLeft + 's';
+      if(hidePingLeft <= 0) {
+        hidePingLeft = hideSettings.ping;
+        sendHidePing();
+      }
+    }, 1000);
+  }
+}
+
+async function sendHidePing() {
+  navigator.geolocation.getCurrentPosition(async pos => {
+    await sb.from('hide_lobbies').update({
+      last_ping_lat: pos.coords.latitude,
+      last_ping_lng: pos.coords.longitude,
+      last_ping_at: new Date().toISOString()
+    }).eq('id', hideLobbyId);
+    toast('📡 Ping inviato!', 'info');
+  }, null, { enableHighAccuracy: true });
+}
+
+function showPingOnMap(lat, lng) {
+  if(hidePingMarker) map.removeLayer(hidePingMarker);
+  hidePingMarker = L.circleMarker([lat, lng], {
+    radius: 18, color: '#ff9500', fillColor: '#ff9500', fillOpacity: 0.25, weight: 3
+  }).bindTooltip('📡 ULTIMO PING', { permanent: false }).addTo(map);
+  toast('📡 Ping ricevuto! Vai a cercarlo!', 'info');
+  setTimeout(() => { if(hidePingMarker) { map.removeLayer(hidePingMarker); hidePingMarker = null; } }, 30000);
+}
+
+function showHiderVisible(lat, lng) {
+  if(hideOpponentMarker) map.removeLayer(hideOpponentMarker);
+  hideOpponentMarker = L.circleMarker([lat, lng], {
+    radius: 14, color: '#ff2244', fillColor: '#ff2244', fillOpacity: 0.6, weight: 3
+  }).bindTooltip('⚠️ FUORI AREA — VISIBILE!', { permanent: true }).addTo(map);
+  toast('⚠️ Il nascosto è fuori area! Lo vedi sulla mappa!', 'err');
+  if(hideVisibleTimer) clearTimeout(hideVisibleTimer);
+  hideVisibleTimer = setTimeout(() => {
+    if(hideOpponentMarker) { map.removeLayer(hideOpponentMarker); hideOpponentMarker = null; }
+  }, 30000);
+}
+
+function checkHideConditions(lat, lng) {
+  if(!hideAreaCenter) return;
+  const distFromCenter = map.distance([lat, lng], hideAreaCenter);
+  const inArea = distFromCenter <= hideSettings.radius;
+
+  if(hideRole === 'hider') {
+    // Controlla se fuori area
+    if(!inArea) {
+      sb.from('hide_lobbies').update({
+        hider_visible: true, hider_lat: lat, hider_lng: lng
+      }).eq('id', hideLobbyId);
+      toast('⚠️ SEI FUORI AREA! Sei visibile per 30 secondi!', 'err');
+      setTimeout(() => sb.from('hide_lobbies').update({ hider_visible: false }).eq('id', hideLobbyId), 30000);
+    }
+
+    // Controlla se alla base
+    const distFromBase = map.distance([lat, lng], hideAreaCenter);
+    if(distFromBase <= 20) {
+      if(!hideBaseInterval) {
+        hideBaseInterval = setInterval(() => {
+          hideBaseAccum++;
+          document.getElementById('hide-base-secs').textContent = hideBaseAccum + 's / ' + HIDE_BASE_TARGET + 's';
+          if(hideBaseAccum >= HIDE_BASE_TARGET) {
+            // Nascosto vince!
+            sb.from('hide_lobbies').update({
+              status: 'ended', winner_id: currentUser.id, end_reason: 'base'
+            }).eq('id', hideLobbyId);
+          }
+        }, 1000);
+      }
+    } else {
+      if(hideBaseInterval) { clearInterval(hideBaseInterval); hideBaseInterval = null; }
+    }
+  }
+
+  if(hideRole === 'seeker') {
+    // Controlla distanza dall'avversario (leggi dal DB periodicamente)
+    sb.from('hide_lobbies').select('hider_lat,hider_lng').eq('id', hideLobbyId).single().then(({ data }) => {
+      if(data?.hider_lat && data?.hider_lng) {
+        const dist = map.distance([lat, lng], [data.hider_lat, data.hider_lng]);
+        document.getElementById('hide-info-box').innerHTML = `
+          🔍 Ruolo: <b style="color:var(--red)">CERCATORE</b><br/>
+          📡 Aspetta i ping del nascosto<br/>
+          📏 Distanza stimata: <b style="color:var(--orange)">${dist < 50 ? '&lt;50m — CI SEI QUASI!' : Math.round(dist)+'m'}</b>
+        `;
+        if(dist <= hideSettings.capture) {
+          sb.from('hide_lobbies').update({
+            status: 'ended', winner_id: currentUser.id, end_reason: 'caught'
+          }).eq('id', hideLobbyId);
+        }
+      }
+    });
+  }
+}
+
+function updateHideUI() {
+  const isHider = hideRole === 'hider';
+  document.getElementById('hide-role-display').textContent = isHider ? '🙈 SEI IL NASCOSTO' : '🔍 SEI IL CERCATORE';
+  document.getElementById('hide-role-display').style.color = isHider ? 'var(--purple)' : 'var(--red)';
+  if(isHider) {
+    document.getElementById('hide-base-timer-box').style.display = 'block';
+    document.getElementById('hide-info-box').innerHTML = `
+      🙈 Ruolo: <b style="color:var(--purple)">NASCOSTO</b><br/>
+      📡 Mandi un ping ogni ${hideSettings.ping} secondi<br/>
+      🏠 Torna alla base (cerchio viola) per <b>${HIDE_BASE_TARGET}s totali</b> per vincere<br/>
+      ⚠️ Se esci dall'area sei visibile per 30 sec!
+    `;
+  } else {
+    document.getElementById('hide-info-box').innerHTML = `
+      🔍 Ruolo: <b style="color:var(--red)">CERCATORE</b><br/>
+      📡 Ricevi un ping ogni ${hideSettings.ping} secondi<br/>
+      🎯 Avvicinati a ${hideSettings.capture}m per catturarlo!
+    `;
+  }
+}
+
+function updateHideTimerDisplay() {
+  const m = Math.floor(hideTimeLeft/60), s = hideTimeLeft%60;
+  document.getElementById('hide-timer-display').textContent = m+':'+String(s).padStart(2,'0');
+}
+
+function endHideGame(result, reason) {
+  clearInterval(hideTimer); clearInterval(hidePingTimer);
+  clearInterval(hideGpsInterval); clearInterval(hideBaseInterval);
+  if(hideChannel) sb.removeChannel(hideChannel);
+  if(hideAreaCircle) map.removeLayer(hideAreaCircle);
+  if(hidePingMarker) map.removeLayer(hidePingMarker);
+  if(hideOpponentMarker) map.removeLayer(hideOpponentMarker);
+
+  const reasonText = reason === 'caught' ? 'Il cercatore ha trovato il nascosto!' :
+                     reason === 'base' ? 'Il nascosto è rimasto alla base 3 minuti!' :
+                     'Tempo scaduto!';
+
+  if(result === 'win') {
+    toast('🏆 HAI VINTO! ' + reasonText, 'ok');
+  } else {
+    toast('💀 HAI PERSO. ' + reasonText, 'err');
+  }
+
+  hideLobbyId = null; hideRole = null; hideAreaCenter = null;
+  showHideView('games-main-view');
+  switchTab('games');
+}
+
+function abandonHideGame() {
+  if(hideLobbyId) {
+    sb.from('hide_lobbies').update({
+      status: 'ended', winner_id: null, end_reason: 'abandoned'
+    }).eq('id', hideLobbyId);
+  }
+  endHideGame('lose', 'abandoned');
+}
+
+function copyHideCode() {
+  const code = document.getElementById('hide-code-badge').textContent;
+  navigator.clipboard.writeText(code).then(() => toast('Codice copiato!', 'ok'));
+}
+
+// ══════════════════════════════════════════════════════════════
+//  TOAST
+// ══════════════════════════════════════════════════════════════
+function toast(msg, type='info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(()=>el.remove(), 3000);
+}
+</script>
+</body>
+</html>
