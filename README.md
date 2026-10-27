@@ -10,6 +10,3 @@ Una mappa interattiva per GTA sviluppata come Progressive Web App (PWA), ottimiz
 ## 🛠️ Tecnologie Utilizzate
 - HTML5 / CSS3 / JavaScript
 - Service Workers & Web App Manifest
-
-## 🌐 Live Demo
-Puoi provare l'applicazione direttamente qui: [GitHub Pages Link]
